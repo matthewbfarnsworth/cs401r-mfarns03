@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Lab 1: Platform Foundation</title>
+<style>
+ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+      line-height:1.55;max-width:52rem;margin:2rem auto;padding:0 1.25rem;color:#1a1a1a}
+ code{background:#f4f4f4;padding:.12em .35em;border-radius:3px;font-size:.92em}
+ pre{background:#f4f4f4;padding:1rem;border-radius:5px;overflow-x:auto}
+ pre code{background:none;padding:0}
+ table{border-collapse:collapse;width:100%;margin:1rem 0}
+ th,td{border:1px solid #ccc;padding:.5rem .6rem;text-align:left;vertical-align:top}
+ th{background:#f0f0f0}
+ blockquote{border-left:4px solid #c8102e;margin:1rem 0;padding:.4rem 1rem;background:#fafafa}
+ h1,h2,h3{line-height:1.25} hr{border:none;border-top:1px solid #ddd;margin:2rem 0}
+</style></head><body>
+<h1 id="lab-1-platform-foundation">Lab 1: Platform Foundation</h1>
+<p><strong>Assigned:</strong> Thu Sep 3 | <strong>Due:</strong> Sat Sep 19, midnight
+<strong>Chapter:</strong> <em>AI Platform &amp; Cloud Architecture</em>
+<strong>Builds on:</strong> Nothing — this is the foundation
+<strong>Structure:</strong> Two parts, one submission, 100 points total</p>
+<h2 id="objective">Objective</h2>
+<p>Build the NorthStar Retail AI platform skeleton on AWS — twice. First by hand in the console (Part A), then as Terraform code (Part B). The sequence is deliberate: you cannot write good Infrastructure as Code for a system you do not understand at the API level. Part A forces you to understand every resource and why it exists. Part B teaches you what IaC is actually automating.</p>
+<p>By the end of this lab, you will have: a mental model of the platform architecture, evidence that you built it manually, and a Terraform codebase that rebuilds it from scratch with a single command.</p>
+<blockquote>
+<p><strong>Scope note:</strong> This lab uses a single public subnet to keep the networking simple. Lab 2 adds private subnets, a NAT Gateway, and the data engineer and model monitor IAM roles — once you have context for why each of those components exists.</p>
+</blockquote>
+<hr />
+<h2 id="architecture-reference">Architecture Reference</h2>
+<p>Before touching any tool — console, CLI, or Terraform — read this specification. Every resource you create in Parts A and B corresponds to a component here.</p>
+<h3 id="what-the-platform-needs-to-do">What the Platform Needs to Do</h3>
+<p>NorthStar's three AI systems (churn prediction, offer generation, customer service agent) all share one platform. In Lab 1, you are building the base layer that every subsequent lab depends on:</p>
+<ol>
+<li><strong>A network boundary</strong> — a VPC that isolates NorthStar's cloud resources from other AWS tenants and controls what traffic can enter and exit</li>
+<li><strong>A storage structure</strong> — an S3 bucket organized by data stage so different roles can only access the data they are responsible for</li>
+<li><strong>An identity model</strong> — IAM roles that enforce who (which AWS service) can do what (which actions) on which data</li>
+<li><strong>A development environment</strong> — SageMaker Studio as the IDE for all ML work in this course</li>
+</ol>
+<h3 id="component-specification">Component Specification</h3>
+<p>Use this specification to build your architecture diagram (Task A1).</p>
+<hr />
+<h4 id="boundary-aws-region-us-east-1">Boundary: AWS Region <code>us-east-1</code></h4>
+<hr />
+<h5 id="boundary-vpc-northstar-dev-vpc">Boundary: VPC — <code>northstar-dev-vpc</code></h5>
+<ul>
+<li><strong>CIDR:</strong> <code>10.0.0.0/16</code></li>
+<li><strong>DNS hostnames:</strong> enabled</li>
+<li><strong>DNS resolution:</strong> enabled</li>
+</ul>
+<hr />
+<h6 id="boundary-availability-zone-us-east-1a">Boundary: Availability Zone <code>us-east-1a</code></h6>
+<p><strong>Public Subnet — <code>northstar-dev-public-1</code></strong>
+- CIDR: <code>10.0.100.0/24</code>
+- Public IP on launch: yes
+- Contains: SageMaker Studio, Internet Gateway route</p>
+<hr />
+<h6 id="vpc-level-network-resources">VPC-Level Network Resources</h6>
+<p><strong>Internet Gateway — <code>northstar-dev-igw</code></strong>
+- Attached to: <code>northstar-dev-vpc</code>
+- Purpose: enables the public subnet to reach the internet (Studio needs to pull container images, reach S3, and serve the Studio UI)</p>
+<p><strong>Route Table — <code>northstar-dev-public-rt</code></strong>
+- Associated subnet: <code>northstar-dev-public-1</code>
+- Routes: <code>0.0.0.0/0</code> → Internet Gateway</p>
+<p><strong>Security Group — <code>northstar-dev-sagemaker-sg</code></strong>
+- Attached to: SageMaker Domain
+- Inbound: all traffic from within <code>10.0.0.0/16</code> (VPC CIDR only — no public internet inbound)
+- Outbound: all traffic</p>
+<hr />
+<h5 id="regional-service-amazon-s3">Regional Service: Amazon S3</h5>
+<p><strong>Bucket — <code>northstar-dev-data-{account-id}</code></strong>
+- Public access: fully blocked
+- Encryption: SSE-S3 (AES-256)
+- Versioning: enabled</p>
+<p>Logical prefixes (S3 folders):</p>
+<table>
+<thead>
+<tr>
+<th>Prefix</th>
+<th>Purpose</th>
+<th>Responsible Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>raw/</code></td>
+<td>Source data as ingested</td>
+<td>DataEngineer (added Lab 2)</td>
+</tr>
+<tr>
+<td><code>processed/</code></td>
+<td>Cleaned, transformed data</td>
+<td>DataEngineer (added Lab 2)</td>
+</tr>
+<tr>
+<td><code>features/</code></td>
+<td>Engineered feature sets</td>
+<td>DataEngineer (added Lab 2)</td>
+</tr>
+<tr>
+<td><code>artifacts/</code></td>
+<td>Trained models, evaluation outputs</td>
+<td>MLEngineer</td>
+</tr>
+</tbody>
+</table>
+<p>Create all four prefixes now. They will be used starting in Lab 2.</p>
+<hr />
+<h5 id="global-service-aws-iam">Global Service: AWS IAM</h5>
+<p><strong>Role — <code>northstar-dev-MLEngineer</code></strong>
+- Trust: <code>sagemaker.amazonaws.com</code>
+- Allowed:
+  - SageMaker: training jobs, endpoints, MLflow App (experiment tracking), model registry, and Studio self-service (describe the Domain and profile; create, list, and delete its own apps and spaces)
+  - S3: read/write <code>artifacts/</code> and <code>features/</code> prefixes
+  - CloudWatch Logs: write
+  - ECR: read (pull training container images)
+- Denied by omission: cannot write to <code>raw/</code> or <code>processed/</code></p>
+<blockquote>
+<p><strong>Note:</strong> <code>northstar-dev-DataEngineer</code> and <code>northstar-dev-ModelMonitor</code> roles are added in Lab 2, when the services those roles govern (Glue, Lambda, CloudWatch) are introduced.</p>
+</blockquote>
+<hr />
+<h5 id="regional-service-amazon-sagemaker">Regional Service: Amazon SageMaker</h5>
+<p><strong>Domain — <code>northstar-dev-domain</code></strong>
+- Auth mode: IAM
+- VPC: <code>northstar-dev-vpc</code>
+- Subnet: <code>northstar-dev-public-1</code>
+- Security group: <code>northstar-dev-sagemaker-sg</code>
+- Default execution role: <code>northstar-dev-MLEngineer</code>
+- Notebook output sharing: disabled
+- Default kernel instance: <code>ml.t3.medium</code></p>
+<p><strong>User Profile — <code>MLEngineer</code></strong>
+- Execution role: <code>northstar-dev-MLEngineer</code></p>
+<blockquote>
+<p><strong>Note:</strong> Studio is placed in the public subnet in Lab 1 for simplicity. Lab 2 moves it to a private subnet with a NAT gateway for egress —the production-appropriate configuration.</p>
+</blockquote>
+<hr />
+<h3 id="connection-map-arrows-for-your-diagram">Connection Map (Arrows for Your Diagram)</h3>
+<table>
+<thead>
+<tr>
+<th>From</th>
+<th>To</th>
+<th>Direction</th>
+<th>Label</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Internet</td>
+<td>Internet Gateway</td>
+<td>↔</td>
+<td>public traffic</td>
+</tr>
+<tr>
+<td>Internet Gateway</td>
+<td>Public Route Table</td>
+<td>→</td>
+<td>routes</td>
+</tr>
+<tr>
+<td>Public Route Table</td>
+<td>Public Subnet</td>
+<td>→</td>
+<td><code>0.0.0.0/0</code></td>
+</tr>
+<tr>
+<td>SageMaker Domain</td>
+<td>Public Subnet</td>
+<td>↔</td>
+<td>runs in</td>
+</tr>
+<tr>
+<td>SageMaker Domain</td>
+<td>SageMaker Security Group</td>
+<td>→</td>
+<td>enforces</td>
+</tr>
+<tr>
+<td>SageMaker Studio (MLEngineer)</td>
+<td>MLEngineer Role</td>
+<td>→</td>
+<td>assumes</td>
+</tr>
+<tr>
+<td>MLEngineer Role</td>
+<td>S3 <code>artifacts/</code></td>
+<td>↔</td>
+<td>read/write</td>
+</tr>
+<tr>
+<td>MLEngineer Role</td>
+<td>S3 <code>features/</code></td>
+<td>↔</td>
+<td>read/write</td>
+</tr>
+<tr>
+<td>MLEngineer Role</td>
+<td>ECR</td>
+<td>→</td>
+<td>pull images</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="starter-kit-canvas-lab-1">Starter Kit (Canvas: Lab 1)</h2>
+<ul>
+<li><code>northstar-scenario-overview.md</code> — NorthStar Retail case description</li>
+<li><code>NorthStar_Retail_AI_Platform.pptx</code> — the case briefing deck</li>
+<li><code>scripts/check-secrets.sh</code> — the exact credential scan the grader runs on your git history. Run it before every tag.</li>
+<li><code>infrastructure/</code> — skeleton module structure for Part B: four empty modules (vpc, storage, iam, sagemaker) plus <code>dev</code> and <code>local</code> environments, every variable declared and documented, every resource left as a TODO. <code>dev/</code> also ships <code>backend.tf.example</code> (Task B3) and <code>terraform.tfvars.example</code> (Task B4). Keep this folder name; <code>scripts/verify-lab1.sh</code> and the rubric depend on it. It ships passing <code>terraform fmt -check -recursive</code> and <code>terraform validate</code>, so you start green — keep it that way, it is 5 of the 15 points in Task B1.</li>
+<li><code>docker-compose.yml</code>, <code>Makefile</code> — LocalStack setup for Task B5</li>
+<li><code>aws-account-setup.md</code> — AWS account setup, credit budget, and cost controls</li>
+<li><code>northstar-data-schema.md</code> — data source schemas</li>
+</ul>
+<blockquote>
+<p><strong>New Account Bootstrap:</strong> SageMaker Studio requires the service-linked role <code>AWSServiceRoleForAmazonSageMakerNotebooks</code>. On a brand-new AWS account, <code>terraform apply</code> may fail on the SageMaker Domain with a service-linked role error. Fix it once: <strong>IAM → Roles → Create Role → AWS Service → SageMaker → SageMaker Studio</strong>, then re-run <code>terraform apply</code>. This is a one-time account bootstrap, not a code error.</p>
+</blockquote>
+<hr />
+<h2 id="getting-your-repository">Getting Your Repository</h2>
+<p>You will build the NorthStar platform in <strong>one repository for the whole course</strong>.
+Every lab extends the previous one — Lab 2 modifies your Lab 1 Terraform rather than
+replacing it — so create this repository once, now, and keep working in it all
+semester.</p>
+<ol>
+<li><strong>Sign in to GitHub first.</strong> The <strong>Use this template</strong> button does not appear
+   to signed-out visitors — the page loads, the button simply is not there, which
+   looks like a broken link. If you do not have an account, create one now.</li>
+<li>Go to <a href="https://github.com/byu-cs401r4-f26/cs401r-lab1-template" target="_blank" rel="noopener">https://github.com/byu-cs401r4-f26/cs401r-lab1-template</a></li>
+<li>Click <strong>Use this template</strong> → <strong>Create a new repository</strong></li>
+<li>Name it <code>cs401r-&lt;your-netid&gt;</code> — no lab number, it is your repository for all seven
+   labs — and leave it <strong>Public</strong></li>
+<li>Clone it locally and work there</li>
+</ol>
+<p>The template holds the same files as the Canvas starter kit zip; use either one.</p>
+<h3 id="submitting-lab-1">Submitting Lab 1</h3>
+<p><strong>Before you tag, confirm these are committed.</strong> Everything here is evidence the
+grader reads; several of them cannot be recreated after <code>terraform destroy</code>, so a
+missing file means that work is graded on whatever else you submitted.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Produced in</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docs/lab1-verify-output.txt</code></td>
+<td>Task B2 — run <code>bash scripts/verify-lab1.sh</code> <strong>while the stack is up</strong></td>
+</tr>
+<tr>
+<td><code>docs/lab1b-apply-output.txt</code></td>
+<td>Task B2 — <code>terraform apply</code> output</td>
+</tr>
+<tr>
+<td><code>docs/lab1b-localstack-output.txt</code></td>
+<td>Task B5 — <code>make local-validate</code></td>
+</tr>
+<tr>
+<td><code>docs/lab1-studio-shutdown.png</code></td>
+<td>Lab 1a — Studio shut down</td>
+</tr>
+<tr>
+<td><code>docs/lab1-adr.md</code></td>
+<td>Architecture decision record</td>
+</tr>
+<tr>
+<td><code>docs/lab1-cost-estimate.md</code></td>
+<td>Cost estimate</td>
+</tr>
+</tbody>
+</table>
+<p><code>scripts/verify-lab1.sh</code> checks for five of the six (it cannot check for its own
+output) and reports anything missing, so run it before you destroy and fix what it flags.</p>
+<p>When you are ready to submit, tag the commit you want graded and push the tag:</p>
+<pre><code class="language-bash">git tag lab1-submit
+git push origin lab1-submit
+</code></pre>
+<p>Then submit <strong>your repository URL</strong> in Canvas. You do not submit the tag name —
+it is always <code>lab1-submit</code> for this lab, and the TA looks for it.</p>
+<p>The TA grades <code>git checkout lab1-submit</code>, so anything you push afterwards while
+starting the next lab does not change this lab's grade. <strong>If you forget the tag, you
+are graded at your last commit before the Canvas deadline</strong> — which, if you have already
+started the next lab, may not be the work you meant to submit. Tag it.</p>
+<blockquote>
+<p><strong>Public repositories, deliberately.</strong> You may read how other students approached
+the problem. Copying their work is plagiarism and is handled under the BYU Honor
+Code — commit your own. And because these are public: never commit credentials.
+No <code>.env</code>, no <code>terraform.tfvars</code>, no AWS keys. Committed secrets are an automatic
+zero. The provided <code>.gitignore</code> already excludes them; do not remove those lines.</p>
+</blockquote>
+<hr />
+<h2 id="lab-1a-manual-provisioning-35-points">Lab 1a: Manual Provisioning (35 points)</h2>
+<p><strong>Goal:</strong> Build the platform using the AWS Console — no scripts, no IaC. This forces you to understand every resource at the API level before abstracting it.</p>
+<h3 id="recommended-order-of-work">Recommended Order of Work</h3>
+<p>Tasks A1–A4 below are numbered the way they are graded. The SageMaker Domain takes 8–12 minutes to provision and its create form requires the network (A2) and the execution role (A3) to already exist, so split A3 around it:</p>
+<table>
+<thead>
+<tr>
+<th>Order</th>
+<th>Task</th>
+<th>What</th>
+<th>Why here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>A1</td>
+<td>Architecture diagram</td>
+<td>Build plan; drawn <em>before</em> the console</td>
+</tr>
+<tr>
+<td>2</td>
+<td>A2</td>
+<td>VPC, subnet, IGW, route table, security group</td>
+<td>The Domain form needs these</td>
+</tr>
+<tr>
+<td>3</td>
+<td>A3 (role)</td>
+<td>IAM role + inline policy</td>
+<td>The Domain form needs the execution role</td>
+</tr>
+<tr>
+<td>4</td>
+<td>A4 (submit)</td>
+<td>Create the Domain, then move on</td>
+<td>Starts the 8–12 minute clock</td>
+</tr>
+<tr>
+<td>5</td>
+<td>A3 (bucket)</td>
+<td>S3 bucket + four prefixes</td>
+<td>Done while the Domain provisions</td>
+</tr>
+<tr>
+<td>6</td>
+<td>A4 (finish)</td>
+<td>User profile → launch Studio → <strong>shut it down</strong> → screenshot</td>
+<td>Wait for InService</td>
+</tr>
+<tr>
+<td>7</td>
+<td>—</td>
+<td>Collect every rubric screenshot, then tear down Part A</td>
+<td>Required before Part B <code>terraform apply</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-a1-architecture-diagram-10-points">Task A1 — Architecture Diagram (10 points)</h3>
+<p>Draw the diagram <strong>before</strong> touching the console. Use it as your build plan.</p>
+<p><strong>Requirements:</strong>
+- Official AWS icons (Cloudcraft, draw.io, or aws.amazon.com/architecture/icons)
+- Show VPC boundary containing the public subnet in <code>us-east-1a</code>
+- Show all resources with their exact names
+- Show MLEngineer role with arrows to the S3 prefixes it accesses
+- Show Internet Gateway connecting the public subnet to the internet
+- Legend identifying each icon type</p>
+<p><strong>Deliverables:</strong> <code>docs/lab1-architecture-diagram.png</code> and source file (<code>docs/lab1-architecture-diagram-source.*</code>)</p>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VPC, public subnet, and AZ boundary correct</td>
+<td>3</td>
+<td>Matches spec — CIDR <code>10.0.0.0/16</code>, subnet <code>10.0.100.0/24</code>, <code>us-east-1a</code></td>
+</tr>
+<tr>
+<td>All resources shown with correct names</td>
+<td>3</td>
+<td><code>northstar-dev-*</code> naming, resource types match spec</td>
+</tr>
+<tr>
+<td>MLEngineer role with access arrows to S3 prefixes</td>
+<td>2</td>
+<td>Role shown; arrows to <code>artifacts/</code> and <code>features/</code> labeled correctly</td>
+</tr>
+<tr>
+<td>Internet Gateway and route visible</td>
+<td>2</td>
+<td>IGW shown attached to VPC; arrow from public subnet to internet</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-a2-network-layer-10-points">Task A2 — Network Layer (10 points)</h3>
+<p><strong>Steps:</strong></p>
+<ol>
+<li><strong>Create VPC</strong> — Name: <code>northstar-dev-vpc</code>, CIDR: <code>10.0.0.0/16</code>, enable DNS hostnames and DNS resolution</li>
+<li><strong>Create Public Subnet</strong> — <code>northstar-dev-public-1</code>, AZ: <code>us-east-1a</code>, CIDR: <code>10.0.100.0/24</code>, enable auto-assign public IP</li>
+<li><strong>Create Internet Gateway</strong> — <code>northstar-dev-igw</code>, then attach it to <code>northstar-dev-vpc</code></li>
+<li><strong>Update the main route table</strong> — add route <code>0.0.0.0/0</code> → <code>northstar-dev-igw</code>; associate <code>northstar-dev-public-1</code></li>
+<li><strong>Create Security Group</strong> — <code>northstar-dev-sagemaker-sg</code>, VPC: <code>northstar-dev-vpc</code>
+   - Inbound: All traffic, Source: <code>10.0.0.0/16</code> (VPC CIDR — no inbound from internet)
+   - Outbound: All traffic, Destination: <code>0.0.0.0/0</code></li>
+</ol>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Screenshot Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VPC with correct CIDR and DNS settings</td>
+<td>3</td>
+<td>VPC console: <code>northstar-dev-vpc</code>, CIDR <code>10.0.0.0/16</code>, DNS hostnames: Enabled</td>
+</tr>
+<tr>
+<td>Public subnet with correct CIDR in <code>us-east-1a</code></td>
+<td>3</td>
+<td>Subnets list: <code>northstar-dev-public-1</code>, CIDR, AZ</td>
+</tr>
+<tr>
+<td>Internet Gateway attached to VPC</td>
+<td>2</td>
+<td>IGW console: state Attached, VPC ID shown</td>
+</tr>
+<tr>
+<td>Route table with IGW route associated to public subnet</td>
+<td>2</td>
+<td>Route Tables: <code>0.0.0.0/0 → igw-*</code>; subnet associations tab showing <code>northstar-dev-public-1</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-a3-storage-and-iam-10-points">Task A3 — Storage and IAM (10 points)</h3>
+<p><strong>S3 Bucket:</strong></p>
+<ol>
+<li><strong>Create bucket</strong> — name: <code>northstar-dev-data-YOUR_ACCOUNT_ID</code>, region: <code>us-east-1</code></li>
+<li><strong>Block all public access</strong> — all four boxes checked</li>
+<li><strong>Enable versioning</strong></li>
+<li><strong>Enable SSE-S3 encryption</strong> (AES-256)</li>
+<li><strong>Create four folder prefixes:</strong> <code>raw/</code>, <code>processed/</code>, <code>features/</code>, <code>artifacts/</code></li>
+</ol>
+<p><strong>IAM Role — <code>northstar-dev-MLEngineer</code></strong></p>
+<ul>
+<li>Go to IAM → Roles → Create Role → AWS Service → SageMaker</li>
+<li>Role name: <code>northstar-dev-MLEngineer</code></li>
+<li>Create an inline policy (name it <code>NorthStarMLEngineerPolicy</code>) with this JSON:</li>
+</ul>
+<pre><code class="language-json">{
+  &quot;Version&quot;: &quot;2012-10-17&quot;,
+  &quot;Statement&quot;: [
+    {
+      &quot;Sid&quot;: &quot;SageMakerCore&quot;,
+      &quot;Effect&quot;: &quot;Allow&quot;,
+      &quot;Action&quot;: [
+        &quot;sagemaker:CreateTrainingJob&quot;, &quot;sagemaker:DescribeTrainingJob&quot;, &quot;sagemaker:StopTrainingJob&quot;,
+        &quot;sagemaker:CreateEndpoint&quot;, &quot;sagemaker:DescribeEndpoint&quot;, &quot;sagemaker:DeleteEndpoint&quot;,
+        &quot;sagemaker:CreateEndpointConfig&quot;, &quot;sagemaker:DeleteEndpointConfig&quot;,
+        &quot;sagemaker:CreateMlflowApp&quot;, &quot;sagemaker:DescribeMlflowApp&quot;, &quot;sagemaker:ListMlflowApps&quot;,
+        &quot;sagemaker:CreatePresignedMlflowAppUrl&quot;,
+        &quot;sagemaker:RegisterModel&quot;, &quot;sagemaker:DescribeModelPackage&quot;, &quot;sagemaker:ListModelPackages&quot;
+      ],
+      &quot;Resource&quot;: &quot;*&quot;
+    },
+    {
+      &quot;Sid&quot;: &quot;StudioSelfService&quot;,
+      &quot;Effect&quot;: &quot;Allow&quot;,
+      &quot;Action&quot;: [
+        &quot;sagemaker:DescribeDomain&quot;, &quot;sagemaker:ListDomains&quot;,
+        &quot;sagemaker:DescribeUserProfile&quot;, &quot;sagemaker:ListUserProfiles&quot;,
+        &quot;sagemaker:DescribeSpace&quot;, &quot;sagemaker:ListSpaces&quot;, &quot;sagemaker:CreateSpace&quot;,
+        &quot;sagemaker:UpdateSpace&quot;, &quot;sagemaker:DeleteSpace&quot;,
+        &quot;sagemaker:DescribeApp&quot;, &quot;sagemaker:ListApps&quot;, &quot;sagemaker:CreateApp&quot;, &quot;sagemaker:DeleteApp&quot;,
+        &quot;sagemaker:CreatePresignedDomainUrl&quot;
+      ],
+      &quot;Resource&quot;: [
+        &quot;arn:aws:sagemaker:*:*:domain/*&quot;, &quot;arn:aws:sagemaker:*:*:user-profile/*&quot;,
+        &quot;arn:aws:sagemaker:*:*:space/*&quot;, &quot;arn:aws:sagemaker:*:*:app/*&quot;
+      ]
+    },
+    {
+      &quot;Sid&quot;: &quot;S3ArtifactsAndFeatures&quot;,
+      &quot;Effect&quot;: &quot;Allow&quot;,
+      &quot;Action&quot;: [&quot;s3:GetObject&quot;, &quot;s3:PutObject&quot;, &quot;s3:DeleteObject&quot;],
+      &quot;Resource&quot;: [
+        &quot;arn:aws:s3:::northstar-dev-data-*/artifacts/*&quot;,
+        &quot;arn:aws:s3:::northstar-dev-data-*/features/*&quot;
+      ]
+    },
+    {
+      &quot;Sid&quot;: &quot;S3BucketList&quot;,
+      &quot;Effect&quot;: &quot;Allow&quot;,
+      &quot;Action&quot;: [&quot;s3:ListBucket&quot;, &quot;s3:GetBucketLocation&quot;],
+      &quot;Resource&quot;: &quot;arn:aws:s3:::northstar-dev-data-*&quot;
+    },
+    {
+      &quot;Sid&quot;: &quot;CloudWatchLogs&quot;,
+      &quot;Effect&quot;: &quot;Allow&quot;,
+      &quot;Action&quot;: [&quot;logs:CreateLogGroup&quot;, &quot;logs:CreateLogStream&quot;, &quot;logs:PutLogEvents&quot;],
+      &quot;Resource&quot;: &quot;arn:aws:logs:*:*:log-group:/aws/sagemaker/*&quot;
+    },
+    {
+      &quot;Sid&quot;: &quot;ECRRead&quot;,
+      &quot;Effect&quot;: &quot;Allow&quot;,
+      &quot;Action&quot;: [&quot;ecr:GetDownloadUrlForLayer&quot;, &quot;ecr:BatchGetImage&quot;, &quot;ecr:GetAuthorizationToken&quot;],
+      &quot;Resource&quot;: &quot;*&quot;
+    }
+  ]
+}
+</code></pre>
+<blockquote>
+<p><strong>Why <code>StudioSelfService</code> exists.</strong> Studio runs <em>as this role</em>. Opening Studio makes the UI call <code>DescribeDomain</code>, <code>ListApps</code>, <code>DescribeUserProfile</code> and friends under the execution role, and launching or shutting down JupyterLab is <code>CreateApp</code> / <code>DeleteApp</code> plus <code>CreatePresignedDomainUrl</code>. Without the statement Studio loads a blank page reading "Permissions not configured correctly", and Task A4's "open Studio once, then shut it down" cannot be done. It is scoped to Studio resource types (<code>domain</code>, <code>user-profile</code>, <code>space</code>, <code>app</code>), so it grants nothing over training jobs or endpoints. (Found 2026-09-14 by opening Studio with the role as previously specified.)</p>
+<p><strong>Why the S3 statements are split.</strong> Object actions (<code>GetObject</code>, <code>PutObject</code>, <code>DeleteObject</code>) are granted only on the <code>artifacts/</code> and <code>features/</code> prefixes. <code>ListBucket</code> is granted on the bucket ARN. Do not add <code>arn:aws:s3:::northstar-dev-data-*</code> to the object-action statement: a trailing <code>*</code> in an ARN also matches <code>/raw/anything</code>, which silently grants the write access this role is supposed to lack. <code>scripts/verify-lab1.sh</code> simulates <code>s3:PutObject</code> on <code>raw/</code> and expects a deny.</p>
+</blockquote>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Screenshot Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S3 bucket: correct name, versioning enabled, SSE-S3, all public access blocked</td>
+<td>4</td>
+<td>Bucket Properties tab: Versioning Enabled, Encryption SSE-S3, Public Access all Blocked</td>
+</tr>
+<tr>
+<td>All 4 prefixes visible in bucket</td>
+<td>3</td>
+<td>S3 Objects panel showing <code>raw/</code>, <code>processed/</code>, <code>features/</code>, <code>artifacts/</code></td>
+</tr>
+<tr>
+<td><code>northstar-dev-MLEngineer</code> role with SageMaker trust and inline policy</td>
+<td>3</td>
+<td>IAM Role detail: Trust Relationships tab (sagemaker.amazonaws.com), Permissions tab (inline policy)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-a4-sagemaker-domain-5-points">Task A4 — SageMaker Domain (5 points)</h3>
+<p>The domain takes 8–12 minutes to provision, and its create form requires the A2 network resources and the A3 <code>northstar-dev-MLEngineer</code> role to already exist. Submit it as soon as those are done, then build the A3 bucket while it provisions.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>SageMaker → Domains → Create Domain → <strong>Standard setup</strong></li>
+<li>Name: <code>northstar-dev-domain</code> | Auth: IAM</li>
+<li>Execution role: <code>northstar-dev-MLEngineer</code></li>
+<li>VPC: <code>northstar-dev-vpc</code> | Subnet: <code>northstar-dev-public-1</code> | Security group: <code>northstar-dev-sagemaker-sg</code></li>
+<li>Sharing: Notebook output sharing → Disabled</li>
+<li>Submit and wait for status: <strong>InService</strong> (8–12 min)</li>
+<li>Add user profile <code>MLEngineer</code> with execution role <code>northstar-dev-MLEngineer</code> → <strong>Launch → Studio</strong></li>
+<li>In Studio: <strong>Applications → JupyterLab → Create JupyterLab space</strong> (any name, instance <code>ml.t3.medium</code>) → <strong>Run space</strong> → <strong>Open JupyterLab</strong></li>
+<li>Verify JupyterLab opens → immediately shut down</li>
+</ol>
+<blockquote>
+<p>⚠️ <strong>Shutdown required every session.</strong> Stopping the browser tab does not stop the instance. Two steps:</p>
+<ol>
+<li>In JupyterLab: <strong>File → Shut Down</strong> (stops the space). Or from the Studio home page: <strong>Applications → JupyterLab</strong> → your space → <strong>Stop</strong>.</li>
+<li>In the Studio left nav: <strong>Running instances</strong> → confirm the list is empty; <strong>Stop</strong> anything still listed. Screenshot this page and save as <code>docs/lab1-studio-shutdown.png</code>.</li>
+</ol>
+<p>Cross-check from outside Studio: SageMaker AI console → Domains → <code>northstar-dev-domain</code> → <strong>User profiles</strong> → <code>MLEngineer</code> → <strong>Apps</strong> tab — nothing should show <strong>InService</strong>. This tab is also an acceptable screenshot. Running app at submission = <strong>−3 points, no exceptions.</strong></p>
+</blockquote>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Screenshot Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Domain InService with correct VPC, subnet, and security group</td>
+<td>2</td>
+<td>Domain details: InService, VPC ID, subnet ID, SG ID</td>
+</tr>
+<tr>
+<td>Studio opens (gates the shutdown screenshot — not graded)</td>
+<td>—</td>
+<td>JupyterLab UI visible</td>
+</tr>
+<tr>
+<td>JupyterServer stopped; screenshot submitted</td>
+<td>3</td>
+<td><code>docs/lab1-studio-shutdown.png</code>: Studio <strong>Running instances</strong> page empty, or console user-profile <strong>Apps</strong> tab with no app InService</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="lab-1b-infrastructure-as-code-45-points">Lab 1b: Infrastructure as Code (45 points)</h2>
+<p><strong>Goal:</strong> Recreate Part A exactly using Terraform. Same CIDRs, same names, same policies. This codebase is your foundation for all remaining labs.</p>
+<h3 id="repo-structure">Repo Structure</h3>
+<pre><code>northstar-ai-platform/
+├── infrastructure/
+│   ├── modules/
+│   │   ├── vpc/            # main.tf  variables.tf  outputs.tf
+│   │   ├── iam/            # main.tf  variables.tf  outputs.tf
+│   │   ├── storage/        # main.tf  variables.tf  outputs.tf
+│   │   └── sagemaker/      # main.tf  variables.tf  outputs.tf
+│   └── environments/
+│       ├── dev/            # main.tf  variables.tf  tfvars.example  backend.tf  outputs.tf
+│       └── local/          # main.tf  outputs.tf
+├── scripts/
+│   ├── bootstrap-state.sh
+│   └── verify-lab1.sh
+├── docs/
+├── Makefile
+├── docker-compose.yml
+├── .gitignore
+└── README.md
+</code></pre>
+<blockquote>
+<p><strong>Security:</strong> Never commit credentials or <code>.tfvars</code> with real values. Grader runs <code>bash scripts/check-secrets.sh</code> (shipped in the starter kit; it scans every revision for real key shapes and ignores AWS's documented placeholder <code>AKIAIOSFODNN7EXAMPLE</code>, which LocalStack prints). Run it yourself before you tag. Automatic 0 if it finds a credential in git history.</p>
+</blockquote>
+<h3 id="recommended-order-of-work_1">Recommended Order of Work</h3>
+<p>Tasks B1–B5 below are numbered the way they are graded, not the way they are done. Do them in this order:</p>
+<table>
+<thead>
+<tr>
+<th>Order</th>
+<th>Task</th>
+<th>What</th>
+<th>Why here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>B1</td>
+<td>Write the four modules; <code>terraform fmt</code> and <code>validate</code> clean</td>
+<td>Everything else consumes this code</td>
+</tr>
+<tr>
+<td>2</td>
+<td>B5</td>
+<td><code>make local-validate</code> against LocalStack</td>
+<td>Free. Catches module bugs before you pay AWS for them</td>
+</tr>
+<tr>
+<td>3</td>
+<td>B3</td>
+<td><code>bash scripts/bootstrap-state.sh</code></td>
+<td>The state bucket must exist before <code>terraform init</code> can configure the backend</td>
+</tr>
+<tr>
+<td>4</td>
+<td>B4</td>
+<td>Confirm variables; optional <code>terraform.tfvars</code></td>
+<td>Every value has a default, but the rubric checks git</td>
+</tr>
+<tr>
+<td>5</td>
+<td>B2</td>
+<td><code>init</code> → <code>plan</code> → <code>apply</code> → screenshots → <code>verify-lab1.sh</code> → <code>destroy</code></td>
+<td>Verify <strong>while the stack is up</strong>; it cannot be re-run after destroy</td>
+</tr>
+<tr>
+<td>6</td>
+<td>—</td>
+<td><code>check-secrets.sh</code> → commit → tag → push</td>
+<td>The tag is what gets graded</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-b1-module-structure-and-code-quality-15-points">Task B1 — Module Structure and Code Quality (15 points)</h3>
+<p><strong><code>modules/vpc/</code></strong> — <code>aws_vpc</code>, <code>aws_subnet</code> (public only), <code>aws_internet_gateway</code>, <code>aws_route_table</code>, <code>aws_route_table_association</code>, <code>aws_security_group</code></p>
+<p><strong><code>modules/storage/</code></strong> — <code>aws_s3_bucket</code>, <code>aws_s3_bucket_public_access_block</code>, <code>aws_s3_bucket_versioning</code>, <code>aws_s3_bucket_server_side_encryption_configuration</code>, <code>aws_s3_object</code> ×4</p>
+<p><strong><code>modules/iam/</code></strong> — one <code>aws_iam_role</code> (MLEngineer trust), one <code>aws_iam_policy</code>, one <code>aws_iam_role_policy_attachment</code></p>
+<p><strong><code>modules/sagemaker/</code></strong> — <code>aws_sagemaker_domain</code>, <code>aws_sagemaker_user_profile</code></p>
+<blockquote>
+<p><strong>Set <code>retention_policy { home_efs_file_system = "Delete" }</code> on the Domain.</strong> Studio creates an EFS filesystem for home directories that Terraform never sees. With the default (<code>Retain</code>) it survives <code>DeleteDomain</code>, its mount target pins your subnet, and <code>terraform destroy</code> hangs on the subnet and security group for ten minutes before failing, which costs you the Task B2 destroy points and leaves a billing filesystem behind. With <code>Delete</code>, destroy finishes in about a minute with nothing left over (measured 2026-09-14: 19 resources destroyed in 69 s). Nothing of value lives in a Studio home directory in this course.</p>
+</blockquote>
+<p>Code quality: all names use variables, all variables have descriptions, all modules expose needed outputs, <code>terraform fmt -check</code> and <code>terraform validate</code> both pass clean.</p>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All 4 modules present with correct resource placement</td>
+<td>5</td>
+<td>Each module contains only its designated resources</td>
+</tr>
+<tr>
+<td>All names parameterized — no hardcoded literals</td>
+<td>5</td>
+<td><code>grep -rn '"northstar-dev"' infrastructure/modules/</code> returns nothing</td>
+</tr>
+<tr>
+<td><code>terraform fmt</code> and <code>terraform validate</code> pass clean</td>
+<td>5</td>
+<td>No output from <code>terraform fmt -check -recursive</code>; validate exits 0</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-b2-apply-and-destroy-15-points">Task B2 — Apply and Destroy (15 points)</h3>
+<blockquote>
+<p><strong>Delete your Part A resources before you apply.</strong> Terraform creates resources with the same names, and two of them are unique keys: the IAM role <code>northstar-dev-MLEngineer</code> fails with <code>EntityAlreadyExists</code>, and the S3 bucket fails with <code>BucketAlreadyOwnedByYou</code>. Take your Part A screenshots first, then delete in this order: SageMaker apps and spaces → user profile → domain (choose to delete the EFS volume) → empty and delete the bucket (it is versioned, so use <strong>Empty</strong> in the console) → IAM role → VPC (the console removes the subnet, route table, IGW, and security group with it). The VPC delete will refuse until the domain is fully gone.</p>
+</blockquote>
+<p>Before you apply: Task B5 (LocalStack) should already be green, and Task B3's <code>bootstrap-state.sh</code> must have run — <code>terraform init</code> fails without the state bucket.</p>
+<pre><code class="language-bash"># Prerequisite (Task B3, one-time)
+bash scripts/bootstrap-state.sh
+
+# Deploy
+cd infrastructure/environments/dev
+terraform init
+terraform plan
+terraform apply 2&gt;&amp;1 | tee ../../../docs/lab1b-apply-output.txt
+</code></pre>
+<p>Verify in the console: Domain InService, S3 bucket with 4 prefixes, VPC with public subnet, MLEngineer role. Open Studio once to confirm, then shut it down.</p>
+<p><strong>Run the verification script BEFORE you destroy.</strong> It reads your Terraform
+outputs and checks your live resources, so once <code>terraform destroy</code> has run
+there is nothing left for it to look at. Commit the output — it is the evidence
+your infrastructure was actually built and correct, which the graded console
+screenshots only partly show.</p>
+<pre><code class="language-bash"># From the repo root, while the stack is still up
+bash scripts/verify-lab1.sh 2&gt;&amp;1 | tee docs/lab1-verify-output.txt
+</code></pre>
+<p>Fix anything it reports and re-run until it is clean. Then, and only then:</p>
+<pre><code class="language-bash">terraform destroy
+</code></pre>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>terraform apply</code> completes with 0 errors</td>
+<td>8</td>
+<td><code>docs/lab1b-apply-output.txt</code> ends with <code>Apply complete! Resources: N added, 0 changed, 0 destroyed</code></td>
+</tr>
+<tr>
+<td>All resources visible in console post-apply</td>
+<td>4</td>
+<td>Screenshots: Domain InService, S3 bucket, VPC subnet, IAM role</td>
+</tr>
+<tr>
+<td><code>terraform destroy</code> completes cleanly</td>
+<td>3</td>
+<td><code>terraform show</code> returns empty state after destroy</td>
+</tr>
+</tbody>
+</table>
+<p><code>docs/lab1-verify-output.txt</code> is a required artifact. It carries no points of its
+own — it is the evidence used to award the Part A and B items above, so a
+missing file means those checks fall back to manual review of your screenshots.</p>
+<hr />
+<h3 id="task-b3-remote-state-8-points">Task B3 — Remote State (8 points)</h3>
+<pre><code class="language-hcl"># backend.tf
+terraform {
+  backend &quot;s3&quot; {
+    bucket         = &quot;northstar-tfstate-YOUR_ACCOUNT_ID&quot;
+    key            = &quot;dev/terraform.tfstate&quot;
+    region         = &quot;us-east-1&quot;
+    dynamodb_table = &quot;northstar-tfstate-lock&quot;
+    encrypt        = true
+  }
+}
+</code></pre>
+<p><code>scripts/bootstrap-state.sh</code> must create the state bucket (versioning, SSE-S3, public access blocked) and DynamoDB lock table, patch <code>backend.tf</code> with the real account ID, and be idempotent.</p>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>State bucket with versioning, encryption, public access blocked</td>
+<td>4</td>
+<td><code>aws s3api get-bucket-versioning / get-bucket-encryption / get-public-access-block</code> all correct</td>
+</tr>
+<tr>
+<td>DynamoDB lock table with <code>LockID</code> hash key</td>
+<td>2</td>
+<td><code>aws dynamodb describe-table</code> returns Active</td>
+</tr>
+<tr>
+<td><code>bootstrap-state.sh</code> idempotent</td>
+<td>2</td>
+<td>Second run exits 0 with "already exists" messages</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-b4-parameterization-4-points">Task B4 — Parameterization (4 points)</h3>
+<p><strong>Required variables in <code>environments/dev/variables.tf</code>:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>project</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>environment</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>aws_region</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>vpc_cidr</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>public_subnet_cidr</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>availability_zone</code></td>
+<td>string</td>
+</tr>
+<tr>
+<td><code>sagemaker_instance_type</code></td>
+<td>string</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All 7 variables defined with descriptions</td>
+<td>2</td>
+<td><code>terraform validate</code> passes; each has non-empty description</td>
+</tr>
+<tr>
+<td><code>terraform.tfvars.example</code> committed; <code>terraform.tfvars</code> absent from git</td>
+<td>2</td>
+<td><code>git ls-files *.tfvars.example</code> returns file; <code>git ls-files *.tfvars</code> returns nothing</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-b5-localstack-validation-3-points">Task B5 — LocalStack Validation (3 points)</h3>
+<p>All vpc, storage, and iam resources are supported in LocalStack Community. The local environment skips only the sagemaker module.</p>
+<p>The starter kit ships everything this task needs: <code>docker-compose.yml</code> (LocalStack), <code>infrastructure/environments/local/</code> (the same three modules pointed at <code>localhost:4566</code>), and a <code>Makefile</code> with the <code>local-validate</code> target. You need Docker running and <code>awslocal</code> installed (<code>pip install awscli-local</code>). Then, from the repo root:</p>
+<pre><code class="language-bash">make local-validate
+</code></pre>
+<p><code>local-validate</code> starts LocalStack, runs <code>terraform init</code> and <code>apply</code> in <code>environments/local</code>, then runs <code>awslocal sts get-caller-identity</code>, <code>awslocal s3 ls</code>, <code>awslocal iam list-roles</code>, <code>awslocal ec2 describe-vpcs</code>, and <code>awslocal ec2 describe-subnets</code>, and saves all output to <code>docs/lab1b-localstack-output.txt</code>. Commit that file. <code>make local-clean</code> tears it all down. Read <code>infrastructure/environments/local/README.md</code> before you run it; it explains what each command verifies and what the output means, and later labs assume you can read this output unaided.</p>
+<blockquote>
+<p>LocalStack emulates AWS's default VPC (<code>172.31.0.0/16</code>, six subnets). Those are not yours. The rubric looks for the <code>10.0.0.0/16</code> VPC and <code>10.0.100.0/24</code> subnet your module created.</p>
+</blockquote>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>make local-validate</code> exits 0; output shows S3 bucket, IAM role, VPC</td>
+<td>3</td>
+<td>All three <code>awslocal</code> commands return expected resources</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="shared-deliverables-20-points">Shared Deliverables (20 points)</h2>
+<h3 id="task-s1-architecture-decision-record-12-points">Task S1 — Architecture Decision Record (12 points)</h3>
+<p>Write <code>docs/lab1-adr.md</code> (700–1000 words):</p>
+<pre><code class="language-markdown">## ADR-001: NorthStar Platform Foundation
+
+### Status
+Accepted
+
+### Context
+[What is NorthStar building? Why does a shared AI platform need an identity model
+and a storage tier structure from day one?]
+
+### Decision
+[Describe the VPC topology, S3 prefix design, and IAM role model you built.
+Every rationale must tie to a NorthStar requirement — not &quot;best practice.&quot;]
+
+### Consequences
+#### What this makes easy
+#### What this makes harder
+#### What would cause you to revisit this decision
+
+### Alternative Considered
+[One genuinely different approach and why you rejected it]
+
+### AWS Service Selection
+- Networking isolation model
+- Storage design
+- Identity model
+- ML development environment
+</code></pre>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Decision references NorthStar-specific requirements</td>
+<td>4</td>
+<td>Mentions churn scoring, LLM serving, or three-system platform — not generic reasoning</td>
+</tr>
+<tr>
+<td>Consequences section is concrete</td>
+<td>4</td>
+<td>Each consequence cites a number, names a constraint, or identifies a failure mode</td>
+</tr>
+<tr>
+<td>Alternative is meaningful, not a strawman</td>
+<td>2</td>
+<td>Could plausibly work; rejection reason is specific</td>
+</tr>
+<tr>
+<td>AWS Service Selection covers all 4 components</td>
+<td>2</td>
+<td>One sentence per component with the deciding reason</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-s2-monthly-cost-estimate-8-points">Task S2 — Monthly Cost Estimate (8 points)</h3>
+<p>Estimate steady-state monthly cost using <a href="https://calculator.aws" target="_blank" rel="noopener">AWS Pricing Calculator</a>:</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Monthly Estimate</th>
+<th>Key Assumptions</th>
+<th>One Optimization</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SageMaker Studio</td>
+<td>$X.XX</td>
+<td>X hrs/day at $Y/hr</td>
+<td></td>
+</tr>
+<tr>
+<td>S3 storage</td>
+<td>$X.XX</td>
+<td>X GB at $0.023/GB</td>
+<td></td>
+</tr>
+<tr>
+<td>Internet Gateway</td>
+<td>$X.XX</td>
+<td>$0.01/GB data transfer</td>
+<td></td>
+</tr>
+<tr>
+<td>DynamoDB (state lock)</td>
+<td>$X.XX</td>
+<td>On-demand, near-zero reads</td>
+<td></td>
+</tr>
+<tr>
+<td>S3 state bucket</td>
+<td>$X.XX</td>
+<td>Minimal storage</td>
+<td></td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>$X.XX</strong></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All 5 components estimated</td>
+<td>3</td>
+<td>Table complete, no "TBD"</td>
+</tr>
+<tr>
+<td>All assumptions explicit and plausible</td>
+<td>3</td>
+<td>Each estimate traces to a stated assumption</td>
+</tr>
+<tr>
+<td>One optimization quantified</td>
+<td>2</td>
+<td>Specific change with estimated savings</td>
+</tr>
+</tbody>
+</table>
+</body></html>
