@@ -1,0 +1,46 @@
+
+========================================
+ NorthStar Lab 1 — Verification Script
+========================================
+
+── Part A: AWS Environment (35 pts total in rubric) ─────────────────────
+  ✓ A2 VPC exists: vpc-09fa2b291b040fa54
+  ✓ A2 Public subnet exists: subnet-0133666b1299127a9
+  ✓ A2 No private subnets (correct for Lab 1)
+  ✓ A3 S3 bucket exists: northstar-dev-data-182243447601
+  ✓ A3 S3 prefix exists: raw/
+  ✓ A3 S3 prefix exists: processed/
+  ✓ A3 S3 prefix exists: features/
+  ✓ A3 S3 prefix exists: artifacts/
+  ✓ A3 IAM role exists: northstar-dev-MLEngineer
+  ✓ A3 IAM sim: MLEngineer can CreateTrainingJob
+  ✓ A3 IAM sim: MLEngineer DENIED write to raw/
+  ✓ A4 SageMaker Domain InService: d-u8hgzvolwark
+
+── Part B: Terraform IaC (Lab 1b) ──────────────────────────────────────
+  ✓ B1 Module exists: vpc/
+  ✓ B1 Module exists: iam/
+  ✓ B1 Module exists: sagemaker/
+  ✓ B1 Module exists: storage/
+  ✓ B4 No hardcoded 'northstar' literals in modules/
+  ✓ B3 Remote state: S3 backend + DynamoDB lock
+  ✓ B2 terraform apply output saved
+  ✓ B2 apply output shows Apply complete
+  ✓ B5 LocalStack validation output saved
+
+── Shared Deliverables ──────────────────────────────────────────────────
+  ✓ S .gitignore present
+  ✓ S .gitignore covers *.tfvars
+  ✓ S .gitignore covers .terraform/
+  ✓ S No AWS credentials in git history (scripts/check-secrets.sh)
+  ✓ A1 Architecture diagram submitted
+  ✓ S Studio shutdown screenshot submitted
+  ✗ S ADR document submitted — docs/lab1-adr.md MISSING
+  ✗ S Cost estimate document submitted — docs/lab1-cost-estimate.md MISSING
+
+========================================
+ Results: 27 passed  2 failed
+========================================
+
+Fix the failing checks above and re-run: bash scripts/verify-lab1.sh
+
