@@ -4,8 +4,8 @@
 [33m│[0m [0m[0mThe parameter "dynamodb_table" is deprecated. Use parameter "use_lockfile"
 [33m│[0m [0minstead.
 [33m╵[0m[0m
-[0m[1mmodule.iam.data.aws_iam_policy_document.sagemaker_trust: Reading...[0m[0m
 [0m[1mmodule.storage.data.aws_caller_identity.current: Reading...[0m[0m
+[0m[1mmodule.iam.data.aws_iam_policy_document.sagemaker_trust: Reading...[0m[0m
 [0m[1mmodule.iam.data.aws_iam_policy_document.sagemaker_trust: Read complete after 0s [id=1147345228][0m
 [0m[1mmodule.storage.data.aws_caller_identity.current: Read complete after 0s [id=182243447601][0m
 
@@ -605,39 +605,39 @@ Do you want to perform these actions?[0m
 [0m[1mmodule.vpc.aws_vpc.this: Creating...[0m[0m
 [0m[1mmodule.iam.aws_iam_role.ml_engineer: Creating...[0m[0m
 [0m[1mmodule.storage.aws_s3_bucket.data: Creating...[0m[0m
-[0m[1mmodule.iam.aws_iam_policy.ml_engineer: Creation complete after 1s [id=arn:aws:iam::182243447601:policy/northstar-dev-NorthStarMLEngineerPolicy][0m
-[0m[1mmodule.iam.aws_iam_role.ml_engineer: Creation complete after 1s [id=northstar-dev-MLEngineer][0m
+[0m[1mmodule.iam.aws_iam_policy.ml_engineer: Creation complete after 0s [id=arn:aws:iam::182243447601:policy/northstar-dev-NorthStarMLEngineerPolicy][0m
+[0m[1mmodule.iam.aws_iam_role.ml_engineer: Creation complete after 0s [id=northstar-dev-MLEngineer][0m
 [0m[1mmodule.iam.aws_iam_role_policy_attachment.ml_engineer: Creating...[0m[0m
-[0m[1mmodule.iam.aws_iam_role_policy_attachment.ml_engineer: Creation complete after 0s [id=northstar-dev-MLEngineer-20260920003958686200000001][0m
+[0m[1mmodule.iam.aws_iam_role_policy_attachment.ml_engineer: Creation complete after 1s [id=northstar-dev-MLEngineer-20260920024035494100000001][0m
 [0m[1mmodule.storage.aws_s3_bucket.data: Creation complete after 2s [id=northstar-dev-data-182243447601][0m
-[0m[1mmodule.storage.aws_s3_bucket_server_side_encryption_configuration.data: Creating...[0m[0m
 [0m[1mmodule.storage.aws_s3_bucket_public_access_block.data: Creating...[0m[0m
+[0m[1mmodule.storage.aws_s3_bucket_server_side_encryption_configuration.data: Creating...[0m[0m
 [0m[1mmodule.storage.aws_s3_bucket_versioning.data: Creating...[0m[0m
-[0m[1mmodule.storage.aws_s3_object.prefixes["artifacts/"]: Creating...[0m[0m
 [0m[1mmodule.storage.aws_s3_object.prefixes["raw/"]: Creating...[0m[0m
 [0m[1mmodule.storage.aws_s3_object.prefixes["features/"]: Creating...[0m[0m
+[0m[1mmodule.storage.aws_s3_object.prefixes["artifacts/"]: Creating...[0m[0m
 [0m[1mmodule.storage.aws_s3_object.prefixes["processed/"]: Creating...[0m[0m
 [0m[1mmodule.storage.aws_s3_bucket_public_access_block.data: Creation complete after 0s [id=northstar-dev-data-182243447601][0m
-[0m[1mmodule.storage.aws_s3_object.prefixes["features/"]: Creation complete after 0s [id=features/][0m
+[0m[1mmodule.storage.aws_s3_object.prefixes["raw/"]: Creation complete after 0s [id=raw/][0m
 [0m[1mmodule.storage.aws_s3_object.prefixes["processed/"]: Creation complete after 0s [id=processed/][0m
 [0m[1mmodule.storage.aws_s3_object.prefixes["artifacts/"]: Creation complete after 0s [id=artifacts/][0m
-[0m[1mmodule.storage.aws_s3_object.prefixes["raw/"]: Creation complete after 0s [id=raw/][0m
-[0m[1mmodule.storage.aws_s3_bucket_server_side_encryption_configuration.data: Creation complete after 1s [id=northstar-dev-data-182243447601][0m
+[0m[1mmodule.storage.aws_s3_object.prefixes["features/"]: Creation complete after 0s [id=features/][0m
+[0m[1mmodule.storage.aws_s3_bucket_server_side_encryption_configuration.data: Creation complete after 0s [id=northstar-dev-data-182243447601][0m
 [0m[1mmodule.storage.aws_s3_bucket_versioning.data: Creation complete after 2s [id=northstar-dev-data-182243447601][0m
 [0m[1mmodule.vpc.aws_vpc.this: Still creating... [00m10s elapsed][0m[0m
-[0m[1mmodule.vpc.aws_vpc.this: Creation complete after 13s [id=vpc-09fa2b291b040fa54][0m
+[0m[1mmodule.vpc.aws_vpc.this: Creation complete after 12s [id=vpc-02a4b20243fb924c1][0m
 [0m[1mmodule.vpc.aws_internet_gateway.this: Creating...[0m[0m
 [0m[1mmodule.vpc.aws_subnet.public: Creating...[0m[0m
 [0m[1mmodule.vpc.aws_security_group.this: Creating...[0m[0m
-[0m[1mmodule.vpc.aws_internet_gateway.this: Creation complete after 0s [id=igw-08ef11da4fa184201][0m
+[0m[1mmodule.vpc.aws_internet_gateway.this: Creation complete after 1s [id=igw-099d625aa373b49d7][0m
 [0m[1mmodule.vpc.aws_route_table.public: Creating...[0m[0m
-[0m[1mmodule.vpc.aws_route_table.public: Creation complete after 1s [id=rtb-07701f857b6a56aab][0m
-[0m[1mmodule.vpc.aws_security_group.this: Creation complete after 3s [id=sg-0092b60d60434a92c][0m
+[0m[1mmodule.vpc.aws_route_table.public: Creation complete after 1s [id=rtb-0c822d0d7a9e51823][0m
+[0m[1mmodule.vpc.aws_security_group.this: Creation complete after 3s [id=sg-01811b88f9a581496][0m
 [0m[1mmodule.vpc.aws_subnet.public: Still creating... [00m10s elapsed][0m[0m
-[0m[1mmodule.vpc.aws_subnet.public: Creation complete after 11s [id=subnet-0133666b1299127a9][0m
+[0m[1mmodule.vpc.aws_subnet.public: Creation complete after 12s [id=subnet-03214b974fcba1958][0m
 [0m[1mmodule.vpc.aws_route_table_association.public: Creating...[0m[0m
 [0m[1mmodule.sagemaker.aws_sagemaker_domain.this: Creating...[0m[0m
-[0m[1mmodule.vpc.aws_route_table_association.public: Creation complete after 1s [id=rtbassoc-0cf7203258efff328][0m
+[0m[1mmodule.vpc.aws_route_table_association.public: Creation complete after 0s [id=rtbassoc-0dcc10ae07279dc5b][0m
 [0m[1mmodule.sagemaker.aws_sagemaker_domain.this: Still creating... [00m10s elapsed][0m[0m
 [0m[1mmodule.sagemaker.aws_sagemaker_domain.this: Still creating... [00m20s elapsed][0m[0m
 [0m[1mmodule.sagemaker.aws_sagemaker_domain.this: Still creating... [00m30s elapsed][0m[0m
@@ -649,16 +649,16 @@ Do you want to perform these actions?[0m
 [0m[1mmodule.sagemaker.aws_sagemaker_domain.this: Still creating... [01m30s elapsed][0m[0m
 [0m[1mmodule.sagemaker.aws_sagemaker_domain.this: Still creating... [01m40s elapsed][0m[0m
 [0m[1mmodule.sagemaker.aws_sagemaker_domain.this: Still creating... [01m50s elapsed][0m[0m
-[0m[1mmodule.sagemaker.aws_sagemaker_domain.this: Creation complete after 1m55s [id=d-u8hgzvolwark][0m
+[0m[1mmodule.sagemaker.aws_sagemaker_domain.this: Creation complete after 1m55s [id=d-bgqmdst1rwir][0m
 [0m[1mmodule.sagemaker.aws_sagemaker_user_profile.ml_engineer: Creating...[0m[0m
-[0m[1mmodule.sagemaker.aws_sagemaker_user_profile.ml_engineer: Creation complete after 3s [id=arn:aws:sagemaker:us-east-1:182243447601:user-profile/d-u8hgzvolwark/MLEngineer][0m
+[0m[1mmodule.sagemaker.aws_sagemaker_user_profile.ml_engineer: Creation complete after 4s [id=arn:aws:sagemaker:us-east-1:182243447601:user-profile/d-bgqmdst1rwir/MLEngineer][0m
 [0m[1m[32m
 Apply complete! Resources: 19 added, 0 changed, 0 destroyed.[0m
 [0m[1m[32m
 Outputs:
 
 [0mml_engineer_role_arn = "arn:aws:iam::182243447601:role/northstar-dev-MLEngineer"
-public_subnet_id = "subnet-0133666b1299127a9"
+public_subnet_id = "subnet-03214b974fcba1958"
 s3_bucket_name = "northstar-dev-data-182243447601"
-sagemaker_domain_id = "d-u8hgzvolwark"
-vpc_id = "vpc-09fa2b291b040fa54"
+sagemaker_domain_id = "d-bgqmdst1rwir"
+vpc_id = "vpc-02a4b20243fb924c1"
