@@ -9,3 +9,4 @@ __pycache__/
 *.zip
 .aws/
 .localstack/
+.terraform.lock.hcl
