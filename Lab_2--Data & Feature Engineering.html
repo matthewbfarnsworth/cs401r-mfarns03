@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Lab 2: Data &amp; Feature Engineering</title>
+<style>
+ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+      line-height:1.55;max-width:52rem;margin:2rem auto;padding:0 1.25rem;color:#1a1a1a}
+ code{background:#f4f4f4;padding:.12em .35em;border-radius:3px;font-size:.92em}
+ pre{background:#f4f4f4;padding:1rem;border-radius:5px;overflow-x:auto}
+ pre code{background:none;padding:0}
+ table{border-collapse:collapse;width:100%;margin:1rem 0}
+ th,td{border:1px solid #ccc;padding:.5rem .6rem;text-align:left;vertical-align:top}
+ th{background:#f0f0f0}
+ blockquote{border-left:4px solid #c8102e;margin:1rem 0;padding:.4rem 1rem;background:#fafafa}
+ h1,h2,h3{line-height:1.25} hr{border:none;border-top:1px solid #ddd;margin:2rem 0}
+</style></head><body>
+<h1 id="lab-2-data-feature-engineering">Lab 2: Data &amp; Feature Engineering</h1>
+<p><strong>Assigned:</strong> Thu Sep 17 | <strong>Due:</strong> Sat Oct 3, midnight
+<strong>Chapter:</strong> <em>Data &amp; Feature Engineering</em>
+<strong>Builds on:</strong> Lab 1 — your S3 bucket, VPC, MLEngineer role, and Terraform codebase
+<strong>Primary tool:</strong> Terraform (all infrastructure changes are IaC from this point forward)</p>
+<h2 id="objective">Objective</h2>
+<p>Extend the NorthStar platform in two directions. First, harden the infrastructure left intentionally simple in Lab 1: move SageMaker into a private subnet behind a NAT Gateway, add the DataEngineer and ModelMonitor IAM roles, and add S3 lifecycle rules. Second, build the data pipeline that feeds the ML platform: raw data lands in S3, Glue crawls and transforms it, and engineered features are written to SageMaker Feature Store.</p>
+<p>By the end of this lab, you will have a working end-to-end data pipeline: raw customer event data → cleaned and transformed records → feature vectors in Feature Store → ready for model training in Lab 3.</p>
+<hr />
+<h2 id="whats-new-in-lab-2">What's New in Lab 2</h2>
+<p>These are additions to Lab 1's foundation. Your existing Terraform modules will be modified and extended — not replaced.</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Lab 1 State</th>
+<th>Lab 2 Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VPC networking</td>
+<td>Public subnet only</td>
+<td>Add private subnet + NAT Gateway; move SageMaker there</td>
+</tr>
+<tr>
+<td>IAM roles</td>
+<td>MLEngineer only</td>
+<td>Add DataEngineer (Glue + Lambda trust) and ModelMonitor</td>
+</tr>
+<tr>
+<td>S3 lifecycle rules</td>
+<td>Deferred</td>
+<td>Add 90-day expiration on <code>raw/</code>, version cleanup on all prefixes</td>
+</tr>
+<tr>
+<td>Data ingestion</td>
+<td>No pipeline</td>
+<td>Glue crawler on <code>raw/</code> + ETL job → <code>processed/</code></td>
+</tr>
+<tr>
+<td>Feature engineering</td>
+<td>No features</td>
+<td>Glue ETL → <code>features/</code> + SageMaker Feature Group</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="architecture-reference">Architecture Reference</h2>
+<p>This specification describes the <strong>complete</strong> Lab 2 platform — Lab 1 components plus all Lab 2 additions. Use it to build your architecture diagram before writing Terraform.</p>
+<h3 id="what-the-data-layer-needs-to-do">What the Data Layer Needs to Do</h3>
+<p>The data pipeline must:</p>
+<ol>
+<li><strong>Ingest raw data at rest</strong> — customer transaction records and behavioral events land in <code>raw/</code> as CSV files</li>
+<li><strong>Discover schema automatically</strong> — a Glue Crawler scans <code>raw/</code> and registers the schema in the Glue Data Catalog so ETL jobs can query it without hardcoded column definitions</li>
+<li><strong>Transform and validate</strong> — a Glue ETL job reads from the catalog, applies type enforcement and null handling, and writes Parquet to <code>processed/</code></li>
+<li><strong>Engineer features and label them</strong> — a second Glue ETL job reads <code>processed/</code>, splits it into an observation window and a holdout window, computes 13 churn-predictive features from the observation window, derives <code>churn_label</code> from the holdout, and writes to <code>features/</code></li>
+<li><strong>Register features for ML</strong> — a SageMaker Feature Group ingests the feature vectors so training jobs in Labs 3–4 can pull them without re-computing</li>
+<li><strong>Enforce data boundaries</strong> — DataEngineer writes <code>raw/</code>, <code>processed/</code>, and <code>features/</code> but cannot write <code>artifacts/</code>; MLEngineer reads <code>features/</code> and writes <code>artifacts/</code>; ModelMonitor reads <code>artifacts/</code> and writes CloudWatch metrics only</li>
+<li><strong>Expire stale data automatically</strong> — raw files older than 90 days are deleted by S3 lifecycle rules</li>
+</ol>
+<h3 id="component-specification">Component Specification</h3>
+<hr />
+<h4 id="boundary-aws-region-us-east-1">Boundary: AWS Region <code>us-east-1</code></h4>
+<hr />
+<h5 id="boundary-vpc-northstar-dev-vpc-extended-from-lab-1">Boundary: VPC — <code>northstar-dev-vpc</code> (extended from Lab 1)</h5>
+<ul>
+<li>CIDR: <code>10.0.0.0/16</code> (unchanged)</li>
+</ul>
+<hr />
+<h6 id="boundary-availability-zone-us-east-1a">Boundary: Availability Zone <code>us-east-1a</code></h6>
+<p><strong>Public Subnet — <code>northstar-dev-public-1</code></strong> <em>(Lab 1 — no changes)</em>
+- CIDR: <code>10.0.100.0/24</code>
+- Now purpose: NAT Gateway anchor point only (Studio moved out of here)</p>
+<p>→ Contains: <strong>NAT Gateway — <code>northstar-dev-nat</code></strong> <em>(new in Lab 2)</em>
+- Elastic IP: <code>northstar-dev-eip</code> (allocated, associated with NAT)
+- Purpose: provides outbound internet access for the private subnet; SageMaker pulls ECR images, calls AWS APIs, reaches S3 via this path</p>
+<p><strong>Private Subnet — <code>northstar-dev-private-1</code></strong> <em>(new in Lab 2)</em>
+- CIDR: <code>10.0.1.0/24</code>
+- Public IP on launch: no
+- Contains: SageMaker Domain, Glue job workers</p>
+<hr />
+<h6 id="vpc-level-network-resources">VPC-Level Network Resources</h6>
+<p><strong>Internet Gateway — <code>northstar-dev-igw</code></strong> <em>(Lab 1 — no changes)</em></p>
+<p><strong>Route Table — <code>northstar-dev-public-rt</code></strong> <em>(Lab 1 — updated association only)</em>
+- Associated subnet: <code>northstar-dev-public-1</code>
+- Routes: <code>0.0.0.0/0</code> → Internet Gateway</p>
+<p><strong>Route Table — <code>northstar-dev-private-rt</code></strong> <em>(new in Lab 2)</em>
+- Associated subnet: <code>northstar-dev-private-1</code>
+- Routes: <code>0.0.0.0/0</code> → NAT Gateway
+- Effect: private subnet resources reach the internet outbound; no inbound internet connections possible</p>
+<p><strong>Security Group — <code>northstar-dev-sagemaker-sg</code></strong> <em>(Lab 1 — no changes)</em></p>
+<hr />
+<h5 id="regional-service-amazon-s3">Regional Service: Amazon S3</h5>
+<p><strong>Bucket — <code>northstar-dev-data-{account-id}</code></strong> <em>(Lab 1 — extended)</em>
+- All Lab 1 settings unchanged (versioning, SSE-S3, public access blocked)
+- <strong>New in Lab 2:</strong> Lifecycle configuration added</p>
+<p>Lifecycle rules <em>(new in Lab 2)</em>:</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Scope</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>expire-raw-data</code></td>
+<td><code>raw/</code></td>
+<td>Delete current versions after 90 days</td>
+</tr>
+<tr>
+<td><code>expire-raw-versions</code></td>
+<td><code>raw/</code></td>
+<td>Delete noncurrent versions after 30 days</td>
+</tr>
+<tr>
+<td><code>expire-processed-versions</code></td>
+<td><code>processed/</code></td>
+<td>Delete noncurrent versions after 30 days</td>
+</tr>
+<tr>
+<td><code>expire-feature-versions</code></td>
+<td><code>features/</code></td>
+<td>Delete noncurrent versions after 60 days</td>
+</tr>
+<tr>
+<td><code>expire-datacapture</code></td>
+<td><code>datacapture/</code></td>
+<td>Delete current versions after 7 days</td>
+</tr>
+</tbody>
+</table>
+<p>The fifth rule covers a prefix nothing writes to yet. Endpoint data capture (Lab 5) writes one object per capture interval for as long as an endpoint is live, and nothing else ever prunes it; it is the only prefix in the platform that grows in proportion to how long someone forgets to tear down. Retention is set now so it exists before the writer does.</p>
+<hr />
+<h5 id="global-service-aws-iam">Global Service: AWS IAM</h5>
+<p><strong>Role — <code>northstar-dev-MLEngineer</code></strong> <em>(Lab 1 — no changes)</em></p>
+<p><strong>Role — <code>northstar-dev-DataEngineer</code></strong> <em>(new in Lab 2)</em>
+- Trust: <code>glue.amazonaws.com</code>, <code>lambda.amazonaws.com</code>, <strong><code>sagemaker.amazonaws.com</code></strong>
+  (the third is required in Task 3: <code>CreateFeatureGroup</code> rejects an execution role that
+  does not trust SageMaker, even though this role is otherwise a pure data-plane identity)
+- Allowed:
+  - Glue: full access (databases, tables, crawlers, jobs, runs) <strong>plus <code>glue:GetConnection</code></strong>
+  - EC2: network-interface lifecycle (<code>CreateNetworkInterface</code>, <code>DeleteNetworkInterface</code>, the <code>Describe*</code> calls) <strong>plus <code>ec2:CreateTags</code> / <code>ec2:DeleteTags</code> on <code>network-interface/*</code></strong>
+  - S3: read/write <code>raw/</code>, <code>processed/</code>, and <code>features/</code> prefixes
+    (<code>features/</code> is required — the feature engineering job in Task 3 writes Parquet there
+    and the Feature Store offline store is backed by it)
+  - SageMaker Feature Store: <code>PutRecord</code>, <code>CreateFeatureGroup</code>, <code>DescribeFeatureGroup</code>
+  - CloudWatch Logs: write
+  - S3: read-only on <code>artifacts/glue/</code> (Glue must fetch its own job scripts)
+- Denied by omission: cannot write <code>artifacts/</code>; cannot run SageMaker training jobs</p>
+<p><strong>Role — <code>northstar-dev-ModelMonitor</code></strong> <em>(new in Lab 2)</em>
+- Trust: <code>sagemaker.amazonaws.com</code>
+- Allowed:
+  - CloudWatch: <code>PutMetricData</code>, <code>GetMetricStatistics</code>, <code>PutMetricAlarm</code>, <code>DescribeAlarms</code>
+  - SageMaker: <code>ListProcessingJobs</code>, <code>DescribeProcessingJob</code> — <strong>read-only visibility into drift runs</strong>
+  - S3: read-only on <code>artifacts/</code> prefix
+  - CloudWatch Logs: write
+- Denied by omission: cannot invoke endpoints; cannot write to S3; cannot modify models; <strong>cannot start a processing job</strong> — that is <code>ModelMonitorExecution</code>'s job, not this one</p>
+<blockquote>
+<p><strong>This role observes; it does not act.</strong> The distinction matters in Lab 6, where the drift analysis runs under <code>northstar-dev-ModelMonitorExecution</code> (which writes reports and pulls containers) while this role only watches. A drift alarm that cannot itself remediate is a design choice, not an oversight.</p>
+</blockquote>
+<hr />
+<h5 id="regional-service-amazon-sagemaker">Regional Service: Amazon SageMaker</h5>
+<p><strong>Domain — <code>northstar-dev-domain</code></strong> <em>(Lab 1 — subnet changed)</em>
+- Subnet: <code>northstar-dev-private-1</code> <em>(changed from public-1; Terraform forces replacement — ~10 min)</em>
+- All other settings unchanged</p>
+<p><strong>User Profile — <code>MLEngineer</code></strong> <em>(Lab 1 — no changes)</em></p>
+<p><strong>Feature Group — <code>northstar-dev-customer-features</code></strong> <em>(new in Lab 2)</em>
+- Record identifier: <code>customer_id</code>
+- Event time feature: <code>event_time</code>
+- Online store: enabled (for real-time inference in Labs 3–4)
+- Offline store: enabled, backed by the <code>features/offline-store/</code> prefix in S3</p>
+<blockquote>
+<p><strong>Keep the two <code>features/</code> writers apart.</strong> The feature engineering job writes its own
+Parquet to <code>features/customers/</code>. The Feature Store offline store manages its own
+directory tree (<code>&lt;account&gt;/sagemaker/&lt;region&gt;/offline-store/...</code>) underneath whatever
+prefix you give it. Point them at the same prefix and the offline store's layout gets
+interleaved with your job output, which makes both hard to query. Use
+<code>features/customers/</code> for the job and <code>features/offline-store/</code> for Feature Store.
+- IAM role: <code>northstar-dev-DataEngineer</code> (writes records); <code>northstar-dev-MLEngineer</code> (reads)
+- Features — 16 definitions: 2 keys, 13 features, 1 label</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>customer_id</code></td>
+<td>String</td>
+<td>Record identifier</td>
+</tr>
+<tr>
+<td><code>event_time</code></td>
+<td>Fractional</td>
+<td>Unix epoch seconds — <strong>not</strong> an ISO 8601 string</td>
+</tr>
+<tr>
+<td><code>days_since_last_purchase</code></td>
+<td>Fractional</td>
+<td>Recency at T</td>
+</tr>
+<tr>
+<td><code>customer_tenure_days</code></td>
+<td>Fractional</td>
+<td>T minus first purchase</td>
+</tr>
+<tr>
+<td><code>purchase_frequency_30d</code></td>
+<td>Fractional</td>
+<td>Orders in the 30 days before T</td>
+</tr>
+<tr>
+<td><code>purchase_frequency_90d</code></td>
+<td>Fractional</td>
+<td>Orders in the 90 days before T</td>
+</tr>
+<tr>
+<td><code>purchase_frequency_180d</code></td>
+<td>Fractional</td>
+<td>Orders in the 180 days before T</td>
+</tr>
+<tr>
+<td><code>avg_order_value</code></td>
+<td>Fractional</td>
+<td>Mean order value, full history</td>
+</tr>
+<tr>
+<td><code>total_spend_90d</code></td>
+<td>Fractional</td>
+<td>Spend in the 90 days before T</td>
+</tr>
+<tr>
+<td><code>total_lifetime_value</code></td>
+<td>Fractional</td>
+<td>Sum of all order values</td>
+</tr>
+<tr>
+<td><code>avg_basket_size_6m</code></td>
+<td>Fractional</td>
+<td>Mean items per order, last 180 days</td>
+</tr>
+<tr>
+<td><code>category_diversity_score</code></td>
+<td>Fractional</td>
+<td>Distinct categories ÷ 8</td>
+</tr>
+<tr>
+<td><code>online_to_store_ratio</code></td>
+<td>Fractional</td>
+<td>1.0 = pure online, 0.0 = pure in-store</td>
+</tr>
+<tr>
+<td><code>loyalty_tier</code></td>
+<td>String</td>
+<td>Bronze / Silver / Gold / Platinum</td>
+</tr>
+<tr>
+<td><code>churn_risk_score</code></td>
+<td>Fractional</td>
+<td>Rule-based recency heuristic, 0.0–1.0 — <strong>not the label</strong></td>
+</tr>
+<tr>
+<td><code>churn_label</code></td>
+<td><strong>Integral</strong></td>
+<td>1 if no purchase in the holdout window, else 0</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>The temporal split is the point of this feature group.</strong></p>
+<p><code>|&lt;------- observation window --------&gt;|&lt;--- holdout ---&gt;|
+2025-04-01                       2026-04-01        2026-06-30
+                                      T             SNAPSHOT</code></p>
+<p>Every feature is computed <strong>only</strong> from purchases on or before <code>T</code>. <code>churn_label</code> is derived
+<strong>only</strong> from the holdout: 1 if the customer made no purchase in <code>(T, SNAPSHOT]</code>.</p>
+<p>Features describe the past; the label describes the future. This is the only construction
+that produces a model worth deploying. Compute recency over the full date range instead and
+it encodes the answer directly — you get a near-perfect AUC in the lab and a model that
+collapses the moment it sees real data. This is the single most common way churn models fail
+in industry, and it is why the split is baked into the lab rather than left as an exercise.</p>
+<p><code>churn_risk_score</code> is retained deliberately and is <strong>not</strong> a substitute for the label. It is a
+pure recency rule, and Lab 3 requires your trained model to beat it. A model that cannot
+outperform a three-line heuristic has not earned its deployment.</p>
+<p><strong>Event time type — read this before you write the feature group.</strong>
+SageMaker Feature Store accepts an event-time feature as either <code>String</code> (ISO 8601) or
+<code>Fractional</code> (Unix epoch seconds). This lab requires <strong><code>Fractional</code></strong>. If you declare the
+feature as <code>String</code> and then pass a numeric epoch value — or declare <code>Fractional</code> and pass
+an ISO string — <code>PutRecord</code> accepts the call and returns success, but the record never
+appears in the online store and never lands in the offline store. There is no error message.
+You will spend an afternoon debugging an empty feature group. Declare <code>Fractional</code>, and
+write <code>event_time</code> as <code>float(datetime.timestamp())</code> in the feature engineering job.</p>
+</blockquote>
+<hr />
+<h5 id="regional-service-aws-glue">Regional Service: AWS Glue</h5>
+<p><strong>Catalog Database — <code>northstar_dev</code></strong> <em>(new in Lab 2)</em>
+- Contains tables auto-discovered by the crawler and registered by ETL jobs</p>
+<p><strong>Crawler — <code>northstar-dev-raw-crawler</code></strong> <em>(new in Lab 2)</em>
+- Role: <code>northstar-dev-DataEngineer</code>
+- Target: S3 <code>raw/customers/</code> prefix
+- Output: table <code>customers</code> in <code>northstar_dev</code> database — the crawler names the table after the S3 prefix (<code>raw/customers/</code>) and no <code>TablePrefix</code> is set, so it is <strong><code>customers</code>, not <code>raw_customers</code></strong>
+- Schedule: on-demand (run manually or trigger from ingestion)</p>
+<p><strong>ETL Job — <code>northstar-dev-transform</code></strong> <em>(new in Lab 2)</em>
+- Type: Glue Spark (Python shell for smaller datasets)
+- Role: <code>northstar-dev-DataEngineer</code>
+- Source: <code>northstar_dev.customers</code> (via Glue catalog)
+- Transforms: type casting, null imputation, deduplication, timestamp normalization
+- Sink: <code>processed/customers/</code> in S3 as Parquet</p>
+<p><strong>ETL Job — <code>northstar-dev-feature-engineer</code></strong> <em>(new in Lab 2)</em>
+- Role: <code>northstar-dev-DataEngineer</code>
+- Source: <code>processed/customers/</code> in S3
+- Computes: RFM features, loyalty tier, churn risk proxy score
+- Sink: <code>features/customers/</code> in S3 (Parquet) + Feature Store <code>PutRecord</code> calls</p>
+<hr />
+<h3 id="connection-map-arrows-for-your-diagram">Connection Map (Arrows for Your Diagram)</h3>
+<p>Draw this as two layers: infrastructure (VPC/network) and data flow (S3/Glue/Feature Store).</p>
+<p><strong>Infrastructure layer:</strong></p>
+<table>
+<thead>
+<tr>
+<th>From</th>
+<th>To</th>
+<th>Direction</th>
+<th>Label</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Internet</td>
+<td>Internet Gateway</td>
+<td>↔</td>
+<td>public traffic</td>
+</tr>
+<tr>
+<td>Internet Gateway</td>
+<td>Public Route Table</td>
+<td>→</td>
+<td>routes</td>
+</tr>
+<tr>
+<td>Public Route Table</td>
+<td>NAT Gateway</td>
+<td>→</td>
+<td><code>0.0.0.0/0</code></td>
+</tr>
+<tr>
+<td>NAT Gateway</td>
+<td>Internet</td>
+<td>→</td>
+<td>outbound only</td>
+</tr>
+<tr>
+<td>Private Route Table</td>
+<td>NAT Gateway</td>
+<td>→</td>
+<td><code>0.0.0.0/0</code></td>
+</tr>
+<tr>
+<td>Private Subnet</td>
+<td>Private Route Table</td>
+<td>→</td>
+<td>associated</td>
+</tr>
+<tr>
+<td>SageMaker Domain</td>
+<td>Private Subnet</td>
+<td>↔</td>
+<td>runs in</td>
+</tr>
+<tr>
+<td>Glue Job Workers</td>
+<td>Private Subnet</td>
+<td>↔</td>
+<td>run in</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Data flow layer:</strong></p>
+<table>
+<thead>
+<tr>
+<th>From</th>
+<th>To</th>
+<th>Direction</th>
+<th>Label</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Source data (external)</td>
+<td>S3 <code>raw/customers/</code></td>
+<td>→</td>
+<td>CSV upload</td>
+</tr>
+<tr>
+<td>Raw Crawler</td>
+<td>S3 <code>raw/customers/</code></td>
+<td>→</td>
+<td>scans schema</td>
+</tr>
+<tr>
+<td>Raw Crawler</td>
+<td>Glue Catalog <code>customers</code></td>
+<td>→</td>
+<td>registers table</td>
+</tr>
+<tr>
+<td>Transform Job</td>
+<td>Glue Catalog <code>customers</code></td>
+<td>→</td>
+<td>reads</td>
+</tr>
+<tr>
+<td>Transform Job</td>
+<td>S3 <code>processed/customers/</code></td>
+<td>→</td>
+<td>writes Parquet</td>
+</tr>
+<tr>
+<td>Feature Engineer Job</td>
+<td>S3 <code>processed/customers/</code></td>
+<td>→</td>
+<td>reads</td>
+</tr>
+<tr>
+<td>Feature Engineer Job</td>
+<td>S3 <code>features/customers/</code></td>
+<td>→</td>
+<td>writes Parquet</td>
+</tr>
+<tr>
+<td>Feature Engineer Job</td>
+<td>Feature Store <code>northstar-dev-customer-features</code></td>
+<td>→</td>
+<td>PutRecord</td>
+</tr>
+<tr>
+<td>MLEngineer (Lab 3+)</td>
+<td>Feature Store</td>
+<td>→</td>
+<td>reads for training</td>
+</tr>
+</tbody>
+</table>
+<p><strong>IAM access layer:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Resource</th>
+<th>Access</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DataEngineer</td>
+<td>S3 <code>raw/</code> + <code>processed/</code> + <code>features/</code></td>
+<td>read/write</td>
+</tr>
+<tr>
+<td>DataEngineer</td>
+<td>S3 <code>artifacts/glue/</code></td>
+<td>read only (job scripts)</td>
+</tr>
+<tr>
+<td>DataEngineer</td>
+<td>Feature Store</td>
+<td>write</td>
+</tr>
+<tr>
+<td>MLEngineer</td>
+<td>S3 <code>features/</code> + <code>artifacts/</code></td>
+<td>read/write</td>
+</tr>
+<tr>
+<td>MLEngineer</td>
+<td>Feature Store</td>
+<td>read</td>
+</tr>
+<tr>
+<td>ModelMonitor</td>
+<td>S3 <code>artifacts/</code></td>
+<td>read only</td>
+</tr>
+<tr>
+<td>ModelMonitor</td>
+<td>CloudWatch</td>
+<td>write metrics</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="starter-kit-canvas-lab-2">Starter Kit (Canvas: Lab 2)</h2>
+<ul>
+<li><code>northstar-raw-sample.csv</code> — roughly 163,000 synthetic <strong>transaction</strong> rows across ~11,400 customers, spanning 2025-04-01 to 2026-06-30. Deliberately dirty: null <code>customer_id</code> values, duplicate <code>transaction_id</code> rows, mixed date formats, missing numeric fields, and stray whitespace — Task 2 is where you clean them. After cleaning, expect ~157,600 rows; ~10,000 customers have enough history in the observation window to carry features.</li>
+</ul>
+<p>The date range is not arbitrary. It covers an observation window (to 2026-04-01) and a 90-day holdout after it, which is what makes the churn label in Task 3 possible. About 21% of customers churn, and roughly a third of those are still buying right up to the cutoff — those are the ones a recency rule will miss.</p>
+<p>Schema:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>transaction_id</code></td>
+<td>string</td>
+<td><code>TXN-{12 alphanumeric}</code>. Natural key — dedup on this.</td>
+</tr>
+<tr>
+<td><code>customer_id</code></td>
+<td>string</td>
+<td><code>CUST-{8 digits}</code>. Repeats across rows by design.</td>
+</tr>
+<tr>
+<td><code>purchase_date</code></td>
+<td>date</td>
+<td>ISO 8601, with ~3% injected in <code>MM/DD/YYYY</code> to force real parsing</td>
+</tr>
+<tr>
+<td><code>order_value</code></td>
+<td>float</td>
+<td>USD, gross. ~4% null.</td>
+</tr>
+<tr>
+<td><code>num_items</code></td>
+<td>integer</td>
+<td>Line items in the order</td>
+</tr>
+<tr>
+<td><code>payment_method</code></td>
+<td>string</td>
+<td><code>credit_card</code>, <code>debit_card</code>, <code>gift_card</code>, <code>cash</code></td>
+</tr>
+<tr>
+<td><code>channel</code></td>
+<td>string</td>
+<td><code>store</code> or <code>online</code></td>
+</tr>
+<tr>
+<td><code>store_id</code></td>
+<td>string</td>
+<td><code>STORE-{3 digits}</code>, or <code>ONLINE</code></td>
+</tr>
+<tr>
+<td><code>product_category</code></td>
+<td>string</td>
+<td>Primary category for the order</td>
+</tr>
+</tbody>
+</table>
+<p>Note there is no <code>loyalty_tier</code> column: tier is <em>derived</em> from lifetime value in Task 3. Feeding it in as raw input would leak the answer.
+- <code>glue-scripts/transform.py</code> — starter Glue ETL script with the schema defined and read/write wired up; the three transform functions are stubbed out
+- <code>glue-scripts/feature_engineer.py</code> — starter feature engineering script with the Feature Store client wired up; the four feature computations are stubbed out
+- <code>scripts/verify-lab2.sh</code> — automated rubric verification script. Run it from the repo root before you submit; it checks the same assertions the TA runs.
+- <code>Makefile</code> — replaces your Lab 1 Makefile. <code>local-validate</code> now takes <code>LOCAL_OUT=</code> so Lab 2's LocalStack evidence goes to <code>docs/lab2-localstack-output.txt</code> instead of overwriting your Lab 1 file, reads the bucket name from <code>terraform output</code>, and confirms no NAT Gateway was created locally. Copy it over the old one.
+- <code>scripts/teardown-lab2.sh</code> — full teardown. <code>terraform destroy</code> alone does not finish the job in this lab; see the Teardown section.</p>
+<hr />
+<h2 id="getting-your-repository">Getting Your Repository</h2>
+<p>Keep working in the repository you created for Lab 1, <code>cs401r-&lt;your-netid&gt;</code>.
+This lab extends the platform you already built; <strong>do not start a new repository.</strong></p>
+<p>Lab 2 ships <strong>new</strong> starter files. Download the Lab 2 starter kit from Canvas (or copy
+them from <a href="https://github.com/byu-cs401r4-f26/cs401r-lab2-template" target="_blank" rel="noopener">https://github.com/byu-cs401r4-f26/cs401r-lab2-template</a>) into your existing
+repository before you begin. Add to what you have — do not replace it.</p>
+<h3 id="submitting-lab-2">Submitting Lab 2</h3>
+<p>When you are ready to submit, tag the commit you want graded and push the tag:</p>
+<pre><code class="language-bash">git tag lab2-submit
+git push origin lab2-submit
+</code></pre>
+<p>Then submit <strong>your repository URL</strong> in Canvas. You do not submit the tag name —
+it is always <code>lab2-submit</code> for this lab, and the TA looks for it.</p>
+<p>The TA grades <code>git checkout lab2-submit</code>, so anything you push afterwards while
+starting the next lab does not change this lab's grade. <strong>If you forget the tag, you
+are graded at your last commit before the Canvas deadline</strong> — which, if you have already
+started the next lab, may not be the work you meant to submit. Tag it.</p>
+<blockquote>
+<p><strong>Public repositories, deliberately.</strong> You may read how other students approached
+the problem. Copying their work is plagiarism and is handled under the BYU Honor
+Code — commit your own. And because these are public: never commit credentials.
+No <code>.env</code>, no <code>terraform.tfvars</code>, no AWS keys. Committed secrets are an automatic
+zero. The provided <code>.gitignore</code> already excludes them; do not remove those lines.</p>
+</blockquote>
+<hr />
+<h2 id="tasks">Tasks</h2>
+<p>All infrastructure changes in this lab are made through Terraform. Do not use the console to create or modify resources (exception: the console is fine for verifying that resources exist as expected).</p>
+<hr />
+<h3 id="task-1-extend-platform-infrastructure-25-points">Task 1 — Extend Platform Infrastructure (25 points)</h3>
+<p>Modify your existing Terraform modules and apply the changes to a real AWS account.</p>
+<p><strong>Changes to <code>modules/vpc/</code>:</strong>
+- Add <code>aws_subnet</code> (private, <code>10.0.1.0/24</code>, <code>us-east-1a</code>, no public IP)
+- Add <code>aws_eip</code> for the NAT Gateway
+- Add <code>aws_nat_gateway</code> in the public subnet, dependent on the EIP
+- Add <code>aws_route_table</code> for the private subnet with <code>0.0.0.0/0 → aws_nat_gateway</code>
+- Add <code>aws_route_table_association</code> for the private subnet
+- Add variable <code>enable_nat_gateway</code> (bool, default true) — set to false in <code>environments/local/</code>
+- Update output to expose <code>private_subnet_id</code></p>
+<p><strong>Changes to <code>modules/storage/</code>:</strong>
+- Add <code>aws_s3_bucket_lifecycle_configuration</code> with the five rules from the Architecture Reference
+- Add variable <code>enable_lifecycle_rules</code> (bool, default true) — set to false in <code>environments/local/</code></p>
+<p><strong>Changes to <code>modules/iam/</code>:</strong>
+- Add <code>northstar-dev-DataEngineer</code> role, policy, and attachment
+- Add <code>northstar-dev-ModelMonitor</code> role, policy, and attachment</p>
+<p><strong>Changes to <code>modules/sagemaker/</code>:</strong>
+- Update <code>subnet_ids</code> in <code>aws_sagemaker_domain</code> to use the new private subnet
+- Set <code>app_network_access_type = "VpcOnly"</code> so Studio egress routes through the NAT Gateway instead of straight out the Internet Gateway
+- If you still have Lab 1 running, both of these force <strong>replacement</strong> — Terraform destroys and recreates the domain (~10 min). That is expected, not a mistake; run <code>terraform plan</code> first and confirm the replacement is the only destructive change. If you destroyed Lab 1 after submitting (as required), the domain is simply created fresh, which takes about the same time.</p>
+<blockquote>
+<p><strong>ASCII only in AWS-facing description fields.</strong> EC2 rejects any non-ASCII character in a security group's <code>description</code> with <code>InvalidParameterValue: Character sets beyond ASCII are not supported</code>. If you pasted an em dash (—), a curly quote, or an arrow into a <code>description</code>, <code>terraform apply</code> fails at <code>CreateSecurityGroup</code> — but <code>terraform validate</code> and LocalStack both accept it, so you will not catch this until you hit real AWS. Use plain hyphens in any <code>description</code> argument that Terraform sends to an AWS API. (Confusingly, IAM <em>does</em> accept non-ASCII in policy descriptions — so the failure looks arbitrary.)</p>
+</blockquote>
+<p><strong>Changes to <code>environments/dev/variables.tf</code>:</strong>
+- Add <code>private_subnet_cidr</code> (string, <code>"10.0.1.0/24"</code>)</p>
+<p><strong>Apply the changes:</strong></p>
+<pre><code class="language-bash">cd infrastructure/environments/dev
+terraform plan    # review carefully — you should see the SageMaker domain marked for replacement
+terraform apply 2&gt;&amp;1 | tee ../../../docs/lab2-extend-output.txt
+</code></pre>
+<p><strong>LocalStack validation (update local environment):</strong></p>
+<pre><code class="language-bash"># environments/local/main.tf additions:
+# - vpc module: enable_nat_gateway = false
+# - storage module: enable_lifecycle_rules = false
+# - iam module: now creates all 3 roles
+make local-validate LOCAL_OUT=docs/lab2-localstack-output.txt
+</code></pre>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Private subnet + NAT Gateway created; SageMaker Domain moved to private subnet</td>
+<td>10</td>
+<td>Console: Domain InService, subnet ID matches <code>northstar-dev-private-1</code>; NAT Gateway Available</td>
+</tr>
+<tr>
+<td>All 3 IAM roles exist with correct trust and policies</td>
+<td>8</td>
+<td><code>aws iam list-roles</code> shows all 3; <code>iam:SimulatePrincipalPolicy</code> confirms DataEngineer cannot <strong>write</strong> <code>artifacts/</code> (read on <code>artifacts/glue/</code> is expected — Glue fetches job scripts there), ModelMonitor cannot write S3</td>
+</tr>
+<tr>
+<td>S3 lifecycle rules applied</td>
+<td>4</td>
+<td><code>aws s3api get-bucket-lifecycle-configuration</code> returns all 5 rules: <code>expire-raw-data</code>, <code>expire-raw-versions</code>, <code>expire-processed-versions</code>, <code>expire-feature-versions</code>, <code>expire-datacapture</code></td>
+</tr>
+<tr>
+<td>LocalStack validation updated and passing</td>
+<td>3</td>
+<td><code>docs/lab2-localstack-output.txt</code> shows 3 IAM roles; VPC exists (NAT skipped)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-2-data-ingestion-pipeline-25-points">Task 2 — Data Ingestion Pipeline (25 points)</h3>
+<p>Build a new <code>modules/glue/</code> module and create the Glue catalog, crawler, and transform ETL job.</p>
+<p><strong>New <code>modules/glue/</code> resources:</strong>
+- <code>aws_glue_catalog_database</code> — <code>northstar_dev</code>
+- <code>aws_glue_crawler</code> — <code>northstar-dev-raw-crawler</code>, targets <code>raw/customers/</code> prefix, role = DataEngineer ARN
+- <code>aws_glue_job</code> — <code>northstar-dev-transform</code>, Glue version 4.0, Python 3, script from S3 (upload <code>glue-scripts/transform.py</code> to <code>artifacts/glue/</code> prefix)
+- <code>aws_s3_object</code> — upload the transform script as part of <code>terraform apply</code></p>
+<blockquote>
+<p><strong>Running Glue inside the VPC — three failures you will hit in this order.</strong>
+Because Lab 2 places Glue workers in the private subnet, the job needs a Glue
+<code>NETWORK</code> connection, and that path has three separate prerequisites. Each one fails at
+<em>provisioning</em> time with a message that does not obviously name the fix, and each only
+appears after you have cleared the previous one:</p>
+<ol>
+<li><code>DataCatalog Connection issue ... not authorized to perform: glue:GetConnection</code> —
+   the role needs <code>glue:GetConnection</code>. Glue resolves the connection before your script
+   ever runs, so this is not a script bug.</li>
+<li><code>At least one security group must open all ingress ports.</code> — Glue requires a
+   <strong>self-referencing</strong> all-ports ingress rule on an attached security group. An
+   equivalent rule written as the VPC CIDR does <em>not</em> satisfy the check; the source must
+   literally be the security group itself (<code>self = true</code> in Terraform).</li>
+<li><code>The specified role doesn't have a permission to create a tag for your elastic
+   network interface.</code> — Glue tags every ENI it creates, so the role needs
+   <code>ec2:CreateTags</code> and <code>ec2:DeleteTags</code> on <code>arn:aws:ec2:*:*:network-interface/*</code>.</li>
+</ol>
+<p>Also note that IAM changes take a few seconds to propagate. If you fix a policy and
+immediately re-run the job, you can see the <em>old</em> error once more — wait ~30 seconds
+before concluding your fix did not work.</p>
+</blockquote>
+<p><strong>Complete the transform script</strong> <code>glue-scripts/transform.py</code>:</p>
+<p>The starter script defines the schema. You must implement the three transform functions:</p>
+<pre><code class="language-python">def cast_types(df):
+    &quot;&quot;&quot;Cast all columns to the types defined in SCHEMA. Drop rows where customer_id is null.&quot;&quot;&quot;
+    # Your implementation here
+
+def impute_nulls(df):
+    &quot;&quot;&quot;
+    Numeric columns: impute with column median.
+    String columns: impute with 'unknown'.
+    &quot;&quot;&quot;
+    # Your implementation here
+
+def deduplicate(df):
+    &quot;&quot;&quot;
+    Drop duplicate transactions: keep one row per transaction_id, taking the
+    most recently loaded (by purchase_date descending) when a transaction_id
+    appears more than once.
+
+    Deduplicate on transaction_id, NOT on customer_id. A customer is expected
+    to have many transactions -- that purchase history is exactly what the
+    feature engineering job in Task 3 aggregates over. Collapsing to one row
+    per customer here would make total_lifetime_value and purchase_frequency_30d
+    impossible to compute downstream.
+    &quot;&quot;&quot;
+    # Your implementation here
+</code></pre>
+<blockquote>
+<p><strong>Why the grain matters.</strong> <code>raw/customers/</code> holds <em>transaction-level</em> rows: one row per
+purchase, many rows per customer. The transform job preserves that grain and only removes
+genuine duplicates — the same <code>transaction_id</code> landing twice from an ingestion retry.
+Task 3 is where the data collapses to one row per customer, by aggregation. Getting this
+backwards is the single most common way to fail Task 3 after passing Task 2.</p>
+</blockquote>
+<p><strong>Upload sample data and run the pipeline:</strong></p>
+<pre><code class="language-bash"># Upload sample data
+aws s3 cp northstar-raw-sample.csv \
+  s3://northstar-dev-data-$(aws sts get-caller-identity --query Account --output text)/raw/customers/northstar-raw-sample.csv
+
+# Run the crawler (waits for completion)
+aws glue start-crawler --name northstar-dev-raw-crawler
+aws glue get-crawler --name northstar-dev-raw-crawler --query 'Crawler.State'
+
+# Verify the table was created
+aws glue get-table --database-name northstar_dev --name customers
+
+# Run the transform job
+aws glue start-job-run --job-name northstar-dev-transform
+aws glue get-job-run --job-name northstar-dev-transform \
+  --run-id $(aws glue get-job-runs --job-name northstar-dev-transform \
+    --query 'JobRuns[0].Id' --output text)
+
+# Verify processed output
+aws s3 ls s3://northstar-dev-data-ACCOUNT_ID/processed/customers/ --recursive
+</code></pre>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Glue catalog database and <code>customers</code> table exist after crawler run</td>
+<td>6</td>
+<td><code>aws glue get-table --database-name northstar_dev --name customers</code> returns schema</td>
+</tr>
+<tr>
+<td>Transform script correctly casts types, imputes nulls, deduplicates</td>
+<td>12</td>
+<td><code>verify-lab2.sh</code> runs assertions against <code>processed/customers/</code> output: correct Parquet schema, 0 null <code>customer_id</code> rows, no duplicate <code>customer_id</code> rows</td>
+</tr>
+<tr>
+<td><code>modules/glue/</code> Terraform resources applied cleanly</td>
+<td>4</td>
+<td>Module present in repo; <code>terraform apply</code> creates crawler and job with 0 errors</td>
+</tr>
+<tr>
+<td>Transform job completes with SUCCEEDED status</td>
+<td>3</td>
+<td><code>aws glue get-job-run</code> returns <code>JobRunState: SUCCEEDED</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-3-feature-engineering-and-labelling-20-points">Task 3 — Feature Engineering and Labelling (20 points)</h3>
+<p>Add the feature engineering ETL job to <code>modules/glue/</code> and a new <code>modules/feature_store/</code> module.</p>
+<p><strong>Add to <code>modules/glue/</code>:</strong>
+- <code>aws_glue_job</code> — <code>northstar-dev-feature-engineer</code>, reads <code>processed/customers/</code>, writes to <code>features/customers/</code> and calls Feature Store</p>
+<p><strong>New <code>modules/feature_store/</code>:</strong>
+- <code>aws_sagemaker_feature_group</code> — <code>northstar-dev-customer-features</code>
+  - Record identifier: <code>customer_id</code>
+  - Event time: <code>event_time</code>
+  - Online store: enabled
+  - Offline store: S3 URI <code>s3://northstar-dev-data-{account-id}/features/offline-store/</code>
+  - Execution role: DataEngineer role ARN
+  - Feature definitions: all 16 from the Architecture Reference table (2 keys, 13 features, 1 label)</p>
+<blockquote>
+<p><strong>Two Feature Store permission traps, both with misleading error messages.</strong></p>
+<ol>
+<li><code>ValidationException: The execution role ARN is invalid</code> — this does <em>not</em> mean the ARN
+   is wrong. It means the role's trust policy is missing <code>sagemaker.amazonaws.com</code>. Add it
+   to DataEngineer's trusted services.</li>
+<li><code>ValidationException: Invalid S3Uri provided</code> — the URI is fine. The role is missing
+   <code>s3:GetBucketAcl</code> on the bucket. Feature Store checks the bucket ACL before accepting it
+   as an offline store target. You also need <code>s3:PutObjectAcl</code> on <code>features/*</code>, because the
+   offline store writes objects with an ACL and plain <code>PutObject</code> is not enough.</li>
+</ol>
+<p>Both fail at <code>terraform apply</code>, before any data moves, so a green <code>terraform validate</code> tells
+you nothing here.</p>
+</blockquote>
+<p><strong>Anchor your time windows to the data, not to <code>today()</code>.</strong> Compute recency and the 30-day
+frequency window relative to the maximum <code>purchase_date</code> in the dataset. If you use the wall
+clock, your features change every time the job runs, and any model Lab 3 trains on them stops
+being reproducible.</p>
+<p><strong>Complete the feature engineering script</strong> <code>glue-scripts/feature_engineer.py</code>:</p>
+<p>The starter script reads from <code>processed/customers/</code>. Implement these feature computations:</p>
+<pre><code class="language-python">def split_windows(df):
+    &quot;&quot;&quot;
+    Split processed transactions into:
+      history : purchase_date &lt;= FEATURE_CUTOFF (T)
+      holdout : FEATURE_CUTOFF &lt; purchase_date &lt;= SNAPSHOT
+    Every feature comes from history. The label comes from holdout.
+    &quot;&quot;&quot;
+    # Your implementation here
+
+def compute_rfm_features(history):
+    &quot;&quot;&quot;
+    One row per customer_id, all windows measured backwards from T:
+      days_since_last_purchase, customer_tenure_days,
+      purchase_frequency_30d / 90d / 180d,
+      avg_order_value, total_spend_90d, total_lifetime_value,
+      avg_basket_size_6m, category_diversity_score, online_to_store_ratio
+    &quot;&quot;&quot;
+    # Your implementation here
+
+def assign_loyalty_tier(df):
+    &quot;&quot;&quot;
+    Bronze: total_lifetime_value &lt; 500
+    Silver: 500 &lt;= total_lifetime_value &lt; 2000
+    Gold: 2000 &lt;= total_lifetime_value &lt; 5000
+    Platinum: total_lifetime_value &gt;= 5000
+    &quot;&quot;&quot;
+    # Your implementation here
+
+def compute_churn_proxy(df):
+    &quot;&quot;&quot;
+    churn_risk_score: rule-based recency heuristic, NOT the label.
+    High risk (0.7-1.0): days_since_last_purchase &gt; 60 AND purchase_frequency_30d == 0
+    Medium risk (0.4-0.7): days_since_last_purchase &gt; 30
+    Low risk (0.0-0.4): otherwise
+    Scale within each band rather than emitting three constants.
+    &quot;&quot;&quot;
+    # Your implementation here
+
+def attach_churn_label(features, holdout):
+    &quot;&quot;&quot;
+    churn_label = 1 if the customer made NO purchase in the holdout window,
+    else 0. Derived exclusively from data after T.
+    &quot;&quot;&quot;
+    # Your implementation here
+</code></pre>
+<p><strong>Run and verify:</strong></p>
+<pre><code class="language-bash"># Run feature engineering job
+aws glue start-job-run --job-name northstar-dev-feature-engineer
+
+# Verify features written to S3
+aws s3 ls s3://northstar-dev-data-ACCOUNT_ID/features/customers/ --recursive
+
+# Verify Feature Store records (after job completes — offline store has ~15 min lag)
+aws sagemaker describe-feature-group --feature-group-name northstar-dev-customer-features
+</code></pre>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All 5 feature functions implemented correctly</td>
+<td>10</td>
+<td><code>verify-lab2.sh</code> checks: no null feature values, all 4 tiers present, <code>churn_risk_score</code> in [0, 1], one row per customer</td>
+</tr>
+<tr>
+<td>Temporal split correct — features from history, label from holdout</td>
+<td>4</td>
+<td><code>churn_label</code> rate between 15% and 30%; no feature computed from post-cutoff data</td>
+</tr>
+<tr>
+<td>Feature Group created via Terraform with all 16 definitions</td>
+<td>3</td>
+<td><code>aws sagemaker describe-feature-group</code> returns 16 features; <code>event_time</code> Fractional; <code>churn_label</code> Integral; online store Enabled</td>
+</tr>
+<tr>
+<td>Feature engineering job completes with SUCCEEDED status</td>
+<td>3</td>
+<td><code>aws glue get-job-run</code> returns SUCCEEDED</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-4-data-contract-and-lineage-15-points">Task 4 — Data Contract and Lineage (15 points)</h3>
+<p><strong>Data Contract</strong> — write <code>docs/lab2-data-contract.md</code>:</p>
+<p>A data contract is a formal agreement between the team that produces a dataset and the team that consumes it. It specifies schema, quality guarantees, and SLAs. Write one for the <code>processed/customers/</code> dataset:</p>
+<pre><code class="language-markdown">## Data Contract: processed/customers
+
+### Producer
+Team / process: Glue ETL job `northstar-dev-transform`
+
+### Consumers
+- Feature engineering job `northstar-dev-feature-engineer`
+- (Future) Direct model training in Lab 3
+
+### Schema
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+[fill in all columns from the processed dataset]
+
+### Quality Guarantees
+- `customer_id` is never null
+- No duplicate `customer_id` rows
+- All numeric columns are within expected ranges (specify bounds)
+- `purchase_date` is a valid ISO 8601 date
+
+### SLA
+- Data is available in `processed/customers/` within 2 hours of landing in `raw/customers/`
+
+### Versioning
+- Schema changes require a new S3 prefix (e.g., `processed/customers/v2/`)
+- Breaking changes require consumer notification 5 business days in advance
+</code></pre>
+<p><strong>Data Lineage Diagram</strong> — create <code>docs/lab2-data-lineage.png</code>:</p>
+<p>Draw a lineage diagram showing the full flow from source to Feature Store. Include: source system → S3 <code>raw/</code> → Glue Crawler → Catalog → Transform Job → S3 <code>processed/</code> → Feature Engineer Job → S3 <code>features/</code> + Feature Store. Label each arrow with the data format (CSV, Parquet, Feature Store records) and the IAM role performing each write.</p>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Data contract covers schema, quality guarantees, SLA, and versioning policy</td>
+<td>8</td>
+<td>All four sections present; quality guarantees include at least 3 specific, measurable assertions</td>
+</tr>
+<tr>
+<td>Lineage diagram is accurate and complete</td>
+<td>7</td>
+<td>All nodes in the data flow present; formats labeled on each edge; IAM roles labeled on each write edge</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="task-5-repository-quality-15-points">Task 5 — Repository Quality (15 points)</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>modules/glue/</code> and <code>modules/feature_store/</code> present with correct resources</td>
+<td>4</td>
+<td>All resources in correct modules; no cross-module duplication</td>
+</tr>
+<tr>
+<td>All Glue and Feature Store resource names parameterized</td>
+<td>3</td>
+<td>No hardcoded strings in <code>.tf</code> files for new modules</td>
+</tr>
+<tr>
+<td><code>terraform fmt</code> and <code>terraform validate</code> pass on all modules</td>
+<td>3</td>
+<td>Clean output from both commands</td>
+</tr>
+<tr>
+<td><code>docs/lab2-extend-output.txt</code> shows a successful apply</td>
+<td>3</td>
+<td>File ends with <code>Apply complete!</code> and contains <code>aws_sagemaker_domain</code>. Either outcome is acceptable: <strong>replacement</strong> if you still had Lab 1 running, <strong>creation</strong> if you destroyed Lab 1 as instructed. Both are correct.</td>
+</tr>
+<tr>
+<td>README updated to describe Lab 2 additions</td>
+<td>2</td>
+<td>README explains new modules, how to run the data pipeline end-to-end</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="teardown-required-read-before-you-submit">Teardown (required — read before you submit)</h3>
+<p><strong>The NAT Gateway bills roughly $0.045/hour (~$32/month) whether or not you send a byte through it.</strong> It is the single largest cost in this lab and it does not stop when you close the console. Leaving it running for three weeks will consume a meaningful share of your $200 in Free Tier credits — credits you still need for Labs 3 through 7.</p>
+<p>After you have captured your verification output and submitted:</p>
+<pre><code class="language-bash">bash scripts/teardown-lab2.sh
+</code></pre>
+<blockquote>
+<p><strong><code>terraform destroy</code> alone will not tear this lab down.</strong> Six resources are created
+outside Terraform's state and survive it. Three of them make <code>destroy</code> hang for 10+ minutes
+and then fail; one of them keeps billing after you believe you are finished.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Orphan</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Glue ENIs left in the private subnet after job runs</td>
+<td>Subnet and security group deletion hang</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>SageMaker Studio EFS filesystem</strong></td>
+<td>Terraform never sees it — <strong>it keeps billing</strong>, and its mount target blocks the subnet</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Two auto-created SageMaker NFS security groups</td>
+<td>VPC deletion hangs</td>
+</tr>
+<tr>
+<td>4</td>
+<td>S3 object versions</td>
+<td><code>BucketNotEmpty</code> — a versioned bucket will not delete while non-empty</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>sagemaker_featurestore</code> Glue database</td>
+<td>Left behind by the offline store</td>
+</tr>
+<tr>
+<td>6</td>
+<td>SageMaker <strong>lineage contexts and artifacts</strong></td>
+<td>Survive <code>DeleteFeatureGroup</code>; refuse to delete until their associations are unwound first</td>
+</tr>
+</tbody>
+</table>
+<p><code>scripts/teardown-lab2.sh</code> handles all six in the correct order and then verifies that no
+billable resource remains. If you insist on running <code>terraform destroy</code> by hand, expect to
+clean up items 1–6 manually and to wait through two failed attempts first.</p>
+<p><strong>Do not trust the AWS console's Resource Explorer to confirm teardown.</strong> Its index lags by
+minutes to hours and will keep listing resources that are already gone — and it may equally
+miss ones that remain. Verify with <code>aws</code> CLI calls against the live API, which is what
+<code>scripts/teardown-lab2.sh</code> does in its final step.</p>
+<p>Item 4 is also why <code>modules/storage/</code> sets <code>force_destroy</code> in the dev environment. That is
+the right call for synthetic, regenerable lab data and <strong>the wrong call for a bucket holding
+real customer records</strong> — it deletes every version with no confirmation.</p>
+</blockquote>
+<p>Commit <code>docs/lab2-destroy-output.txt</code>. Lab 3 begins by re-running <code>terraform apply</code>, which rebuilds everything from your committed code in about 15 minutes — that rebuild is itself the proof that your infrastructure is genuinely reproducible.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Infrastructure destroyed after submission</td>
+<td>—</td>
+<td><code>docs/lab2-destroy-output.txt</code> ends with <code>Destroy complete!</code> <strong>and</strong> <code>scripts/teardown-lab2.sh</code> reports no billable resources remaining. <strong>Gate, not points:</strong> if this evidence is missing, Task 1 is capped at half credit until you produce it.</td>
+</tr>
+</tbody>
+</table>
+</body></html>
