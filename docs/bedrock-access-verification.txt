@@ -1,0 +1,2 @@
+PASS  Titan embeddings        dim=1024
+PASS  Claude Haiku 4.5        'OK'
