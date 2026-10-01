@@ -22,8 +22,20 @@ variable "public_subnet_cidr" {
   default     = "10.0.100.0/24"
 }
 
+variable "private_subnet_cidr" {
+  description = "CIDR block for the private subnet"
+  type        = string
+  default     = "10.0.1.0/24"
+}
+
 variable "availability_zone" {
-  description = "Availability Zone for the public subnet"
+  description = "Availability Zone for the public and private subnets"
   type        = string
   default     = "us-east-1a"
+}
+
+variable "enable_nat_gateway" {
+  description = "Whether to create the EIP, NAT Gateway, and private default route"
+  type        = bool
+  default     = true
 }

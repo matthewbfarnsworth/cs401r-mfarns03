@@ -18,10 +18,11 @@
 # module call in environments/dev/main.tf.
 
 resource "aws_sagemaker_domain" "this" {
-  domain_name = "${var.project}-${var.environment}-domain"
-  auth_mode   = "IAM"
-  vpc_id      = var.vpc_id
-  subnet_ids  = var.subnet_ids
+  domain_name             = "${var.project}-${var.environment}-domain"
+  auth_mode               = "IAM"
+  app_network_access_type = "VpcOnly"
+  vpc_id                  = var.vpc_id
+  subnet_ids              = var.subnet_ids
 
   default_user_settings {
     execution_role  = var.execution_role_arn

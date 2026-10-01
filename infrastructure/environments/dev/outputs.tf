@@ -12,6 +12,11 @@ output "public_subnet_id" {
   value       = module.vpc.public_subnet_id
 }
 
+output "private_subnet_id" {
+  description = "ID of the private subnet"
+  value       = module.vpc.private_subnet_id
+}
+
 output "s3_bucket_name" {
   description = "Name of the data bucket"
   value       = module.storage.bucket_name
@@ -20,6 +25,16 @@ output "s3_bucket_name" {
 output "ml_engineer_role_arn" {
   description = "ARN of the MLEngineer role"
   value       = module.iam.ml_engineer_role_arn
+}
+
+output "data_engineer_role_arn" {
+  description = "ARN of the DataEngineer role"
+  value       = module.iam.data_engineer_role_arn
+}
+
+output "model_monitor_role_arn" {
+  description = "ARN of the ModelMonitor role"
+  value       = module.iam.model_monitor_role_arn
 }
 
 output "sagemaker_domain_id" {

@@ -15,3 +15,15 @@ variable "prefixes" {
   type        = list(string)
   default     = ["raw/", "processed/", "features/", "artifacts/"]
 }
+
+variable "enable_lifecycle_rules" {
+  description = "Whether to apply lifecycle rules to the data bucket"
+  type        = bool
+  default     = true
+}
+
+variable "force_destroy" {
+  description = "Whether Terraform may delete the bucket while it contains objects or versions"
+  type        = bool
+  default     = false
+}
