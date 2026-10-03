@@ -56,6 +56,14 @@ resource "aws_s3_object" "transform_script" {
   content_type = "text/x-python"
 }
 
+resource "aws_s3_object" "feature_engineer_script" {
+  bucket       = var.bucket_name
+  key          = var.feature_engineer_script_key
+  source       = var.feature_engineer_script_path
+  etag         = filemd5(var.feature_engineer_script_path)
+  content_type = "text/x-python"
+}
+
 resource "aws_glue_job" "transform" {
   name              = "${local.name_prefix}-transform"
   description       = "Cleans raw customer transactions and writes processed Parquet"
@@ -90,5 +98,43 @@ resource "aws_glue_job" "transform" {
 
   tags = {
     Name = "${local.name_prefix}-transform"
+  }
+}
+
+resource "aws_glue_job" "feature_engineer" {
+  name              = "${local.name_prefix}-feature-engineer"
+  description       = "Computes customer features and ingests them into Feature Store"
+  role_arn          = var.data_engineer_role_arn
+  glue_version      = "4.0"
+  worker_type       = "G.1X"
+  number_of_workers = 2
+  max_retries       = 0
+  timeout           = 60
+  connections       = [aws_glue_connection.network.name]
+
+  command {
+    name            = "glueetl"
+    python_version  = "3"
+    script_location = "s3://${var.bucket_name}/${aws_s3_object.feature_engineer_script.key}"
+  }
+
+  default_arguments = {
+    "--job-language"                     = "python"
+    "--enable-glue-datacatalog"          = "true"
+    "--enable-metrics"                   = ""
+    "--enable-continuous-cloudwatch-log" = "true"
+    "--input_path"                       = "s3://${var.bucket_name}/${var.processed_data_prefix}"
+    "--output_path"                      = "s3://${var.bucket_name}/${var.feature_data_prefix}"
+    "--feature_group_name"               = var.feature_group_name
+    "--region"                           = var.aws_region
+    "--TempDir"                          = "s3://${var.bucket_name}/features/glue-temp/"
+  }
+
+  execution_property {
+    max_concurrent_runs = 1
+  }
+
+  tags = {
+    Name = "${local.name_prefix}-feature-engineer"
   }
 }

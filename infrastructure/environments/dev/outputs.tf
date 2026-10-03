@@ -52,6 +52,21 @@ output "transform_job_name" {
   value       = module.glue.transform_job_name
 }
 
+output "feature_engineer_job_name" {
+  description = "Name of the feature engineering Glue job"
+  value       = module.glue.feature_engineer_job_name
+}
+
+output "feature_group_name" {
+  description = "Name of the SageMaker customer Feature Group"
+  value       = module.feature_store.feature_group_name
+}
+
+output "feature_group_arn" {
+  description = "ARN of the SageMaker customer Feature Group"
+  value       = module.feature_store.feature_group_arn
+}
+
 output "sagemaker_domain_id" {
   description = "ID of the SageMaker Domain"
   value       = module.sagemaker.domain_id
