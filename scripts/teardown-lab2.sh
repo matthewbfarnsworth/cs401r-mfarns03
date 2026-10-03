@@ -30,7 +30,14 @@ REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 PROJECT="${PROJECT:-northstar}"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 TF_DIR="infrastructure/environments/${ENVIRONMENT}"
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+# Without credentials every step below fails quietly and the final check used
+# to report OK anyway (2026-10-01). Stop here instead.
+if [ -z "${ACCOUNT_ID}" ]; then
+  echo "==> ERROR: AWS CLI is not authenticated (aws sts get-caller-identity failed)."
+  echo "    Check AWS_PROFILE / credentials and re-run. Nothing was deleted."
+  exit 1
+fi
 BUCKET="${PROJECT}-${ENVIRONMENT}-data-${ACCOUNT_ID}"
 
 echo "==> Lab 2 teardown"
@@ -180,9 +187,15 @@ echo "[7/7] Verifying teardown"
 fail=0
 # The CLI applies --query per page of a paginated response, so `length(...)`
 # can print one number per page. Sum whatever comes back.
+#
+# A failed AWS call is a FAILED check, never "OK". Piping straight into awk
+# turned an error (expired credentials, wrong profile) into "0 -> OK", so the
+# teardown could report clean while resources were still billing (2026-10-01).
 check () {
-  n=$(eval "$2" 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
-  [ -z "${n}" ] && n=0
+  if ! raw=$(eval "$2" 2>/dev/null); then
+    printf "      %-22s CHECK FAILED (AWS call errored; credentials/region?)\n" "$1"; fail=1; return
+  fi
+  n=$(printf '%s\n' "${raw}" | awk '{ s += $1 } END { print s + 0 }')
   if [ "${n}" = "0" ]; then
     printf "      %-22s OK\n" "$1"
   else
@@ -205,6 +218,7 @@ if [ "${fail}" = "0" ]; then
   echo "==> Teardown complete. No billable Lab 2 resources remain."
   echo "    The Terraform state bucket is intentionally retained for Lab 3."
 else
-  echo "==> WARNING: resources above are still present and may be billing."
+  echo "==> WARNING: teardown NOT verified. Fix anything marked STILL PRESENT or"
+  echo "    CHECK FAILED and re-run. Resources may still be billing."
   exit 1
 fi
