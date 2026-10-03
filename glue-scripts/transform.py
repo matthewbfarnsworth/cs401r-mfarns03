@@ -63,8 +63,29 @@ def cast_types(df):
     key for every downstream feature, so a row without it cannot be
     attributed to anyone.
     """
-    # TODO: your implementation here
-    raise NotImplementedError("cast_types is not implemented")
+    for column_name in SCHEMA:
+        trimmed = F.trim(F.col(column_name).cast("string"))
+        df = df.withColumn(
+            column_name,
+            F.when(trimmed == "", F.lit(None)).otherwise(trimmed),
+        )
+
+    df = df.withColumn(
+        "purchase_date",
+        F.coalesce(
+            F.to_date(F.col("purchase_date"), "yyyy-MM-dd"),
+            F.to_date(F.col("purchase_date"), "MM/dd/yyyy"),
+        ),
+    )
+
+    for column_name, target_type in SCHEMA.items():
+        if column_name != "purchase_date":
+            df = df.withColumn(
+                column_name,
+                F.col(column_name).cast(target_type),
+            )
+
+    return df.filter(F.col("customer_id").isNotNull())
 
 
 def impute_nulls(df):
@@ -79,8 +100,23 @@ def impute_nulls(df):
 
     Numeric columns: NUMERIC_COLS.  String columns: STRING_COLS.
     """
-    # TODO: your implementation here
-    raise NotImplementedError("impute_nulls is not implemented")
+    numeric_fill_values = {}
+
+    for column_name in NUMERIC_COLS:
+        quantiles = df.approxQuantile(column_name, [0.5], 0.0)
+        if not quantiles:
+            raise ValueError(
+                f"Cannot impute {column_name}: no non-null values"
+            )
+
+        median = quantiles[0]
+        if SCHEMA[column_name] == "int":
+            median = int(round(median))
+
+        numeric_fill_values[column_name] = median
+
+    df = df.fillna(numeric_fill_values)
+    return df.fillna("unknown", subset=STRING_COLS)
 
 
 def deduplicate(df):
@@ -101,8 +137,29 @@ def deduplicate(df):
     A window function with row_number() over a partition by transaction_id
     is the idiomatic approach.
     """
-    # TODO: your implementation here
-    raise NotImplementedError("deduplicate is not implemented")
+    ordering = [
+        F.col("purchase_date").desc_nulls_last(),
+        F.col("order_value").desc_nulls_last(),
+        F.col("customer_id").asc_nulls_last(),
+        F.col("num_items").desc_nulls_last(),
+        F.col("payment_method").asc_nulls_last(),
+        F.col("channel").asc_nulls_last(),
+        F.col("store_id").asc_nulls_last(),
+        F.col("product_category").asc_nulls_last(),
+    ]
+
+    transaction_window = Window.partitionBy("transaction_id").orderBy(
+        *ordering
+    )
+
+    return (
+        df.withColumn(
+            "_transaction_rank",
+            F.row_number().over(transaction_window),
+        )
+        .filter(F.col("_transaction_rank") == 1)
+        .drop("_transaction_rank")
+    )
 
 
 def main():

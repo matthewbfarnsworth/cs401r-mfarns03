@@ -29,6 +29,18 @@ module "iam" {
   environment = var.environment
 }
 
+module "glue" {
+  source                 = "../../modules/glue"
+  project                = var.project
+  environment            = var.environment
+  bucket_name            = module.storage.bucket_name
+  data_engineer_role_arn = module.iam.data_engineer_role_arn
+  private_subnet_id      = module.vpc.private_subnet_id
+  security_group_id      = module.vpc.security_group_id
+  availability_zone      = var.availability_zone
+  transform_script_path  = "${path.root}/../../../glue-scripts/transform.py"
+}
+
 module "sagemaker" {
   source             = "../../modules/sagemaker"
   project            = var.project

@@ -27,6 +27,8 @@ resource "aws_sagemaker_domain" "this" {
   default_user_settings {
     execution_role  = var.execution_role_arn
     security_groups = var.security_group_ids
+
+    studio_web_portal_settings {}
   }
 
   retention_policy {

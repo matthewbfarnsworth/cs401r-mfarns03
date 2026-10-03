@@ -37,6 +37,21 @@ output "model_monitor_role_arn" {
   value       = module.iam.model_monitor_role_arn
 }
 
+output "glue_database_name" {
+  description = "Name of the Glue Catalog database"
+  value       = module.glue.database_name
+}
+
+output "raw_crawler_name" {
+  description = "Name of the raw-data Glue crawler"
+  value       = module.glue.raw_crawler_name
+}
+
+output "transform_job_name" {
+  description = "Name of the transform Glue job"
+  value       = module.glue.transform_job_name
+}
+
 output "sagemaker_domain_id" {
   description = "ID of the SageMaker Domain"
   value       = module.sagemaker.domain_id
