@@ -1,0 +1,61 @@
+sagemaker.config INFO - Not applying SDK defaults from location: /Library/Application Support/sagemaker/config.yaml
+sagemaker.config INFO - Not applying SDK defaults from location: /Users/matthewbfarnsworth/Library/Application Support/sagemaker/config.yaml
+Loaded validation winner: output/tuning/tuning-winner.json
+Final retraining will use depth=6, child_weight=10, subsample=0.6, colsample=1.0, eta=0.1, rounds=35
+============================================================
+NorthStar Churn Prediction — Training Script
+============================================================
+Athena QueryExecutionId: 6c5337aa-ee4e-4775-823f-d11b1b220996
+Preprocessing 9,999 samples...
+  Positive class rate: 22.0%
+  Feature matrix shape: (9999, 11)
+
+Final train: 6,999 | Final held-out test: 3,000
+
+Training XGBoost with params: {
+  "objective": "binary:logistic",
+  "eval_metric": [
+    "logloss",
+    "auc"
+  ],
+  "max_depth": 6,
+  "eta": 0.1,
+  "min_child_weight": 10,
+  "subsample": 0.6,
+  "colsample_bytree": 1.0,
+  "scale_pos_weight": 3.544805194805195,
+  "seed": 42,
+  "verbosity": 1
+}
+[0]	train-logloss:0.66584	train-auc:0.78686
+[25]	train-logloss:0.48462	train-auc:0.85291
+[34]	train-logloss:0.46751	train-auc:0.86476
+/Users/matthewbfarnsworth/projects/cs401r-mfarns03/churn_training_skeleton.py:608: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "eval_timestamp": datetime.utcnow().isoformat(),
+/Users/matthewbfarnsworth/projects/cs401r-mfarns03/churn_training_skeleton.py:863: UserWarning: [11:50:01] WARNING: /Users/runner/work/xgboost/xgboost/src/c_api/c_api.cc:1573: Saving model in the UBJSON format as default.  You can use a file extension: `json` or `ubj` to choose between formats.
+  model.save_model(model_path)
+/Users/matthewbfarnsworth/projects/cs401r-mfarns03/churn_training_skeleton.py:876: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "training_date": datetime.utcnow().isoformat(),
+
+── Evaluation Results ──────────────────────────────
+  precision_top10          : 0.7067  (threshold: 0.5000)  ✓ PASS
+  recall_top10             : 0.3212  (threshold: 0.2500)  ✓ PASS
+  auc_lift 95% CI          : [0.0354, 0.0727]  (must exclude 0)  ✓ PASS
+  All thresholds passed ✓
+✓ Confusion matrix: docs/lab3-evidence/confusion-matrix.png
+✓ Feature importance: docs/lab3-evidence/feature-importance.png
+✓ Slice evaluation: docs/lab3-evidence/slice-evaluation.csv
+🏃 View run xgb-final-run48-most-churners at: https://mlflow.sagemaker.us-east-1.app.aws/#/experiments/1/runs/19c1bc4e633243329546e03bfe2f4641
+🧪 View experiment at: https://mlflow.sagemaker.us-east-1.app.aws/#/experiments/1
+✓ MLflow run logged: 19c1bc4e633243329546e03bfe2f4641
+✓ Evaluation metrics: docs/lab3-evidence/evaluation_metrics.json
+
+✓ Model saved to model/model.xgb
+✓ Model archive saved to model/model.tar.gz
+✓ Model archive uploaded to s3://northstar-dev-data-182243447601/artifacts/lab3/models/20261017T175001Z/model.tar.gz
+✓ Created model package group: northstar-churn-models
+✓ Registered PendingManualApproval model: arn:aws:sagemaker:us-east-1:182243447601:model-package/northstar-churn-models/1
+
+============================================================
+Final training complete. Test AUC-ROC: 0.7785
+============================================================

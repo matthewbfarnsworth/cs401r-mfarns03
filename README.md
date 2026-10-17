@@ -115,3 +115,63 @@ bash scripts/teardown-lab2.sh
 ```
 
 The script writes `docs/lab2-destroy-output.txt` and verifies that no billable Lab 2 resources remain.
+
+## Lab 3: Model Development
+
+The churn model trains locally with XGBoost against customer features queried from the SageMaker Feature Store offline store through Athena. Hyperparameter tuning uses a separate validation split and keeps the final 30% test set untouched. The selected model is retrained on the full development split, evaluated once on the test set, logged to the SageMaker MLflow App, and registered with `PendingManualApproval` status.
+
+### Training and evaluation
+
+This requires the Lab 2 infrastructure and feature pipeline to be running, an authenticated AWS CLI, and the project virtual environment. Resolve the account-specific resources first:
+
+```bash
+export AWS_DEFAULT_REGION=us-east-1
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+BUCKET="northstar-dev-data-${ACCOUNT_ID}"
+MLFLOW_APP_ARN=$(aws sagemaker list-mlflow-apps \
+  --query "Summaries[?Name=='northstar-mlflow'].Arn | [0]" \
+  --output text)
+```
+
+Run the validation grid without evaluating the held-out test set:
+
+```bash
+.venv/bin/python churn_tuning.py \
+  --feature-group-name northstar-dev-customer-features \
+  --artifacts-bucket "${BUCKET}" \
+  --mlflow-arn "${MLFLOW_APP_ARN}" \
+  --output-data-dir output/tuning
+```
+
+Run the selected configuration once against the final test set and capture the graded output:
+
+```bash
+mkdir -p docs/lab3-evidence
+.venv/bin/python churn_training_skeleton.py \
+  --feature-group-name northstar-dev-customer-features \
+  --artifacts-bucket "${BUCKET}" \
+  --mlflow-arn "${MLFLOW_APP_ARN}" \
+  --winner-config output/tuning/tuning-winner.json \
+  --output-data-dir docs/lab3-evidence \
+  --model-dir model \
+  --run-name xgb-final \
+  2>&1 | tee docs/lab3-evidence/train-final.log
+```
+
+The final run writes its metrics, confusion matrix, feature-importance plot, and loyalty-tier evaluation to `docs/lab3-evidence/`. The evaluation discussion is in `docs/lab3-evaluation-report.md`.
+
+### Evidence and teardown
+
+Export AWS-side evidence after the final training and Track C evaluation, but before teardown:
+
+```bash
+bash scripts/collect-lab3-evidence.sh --track C
+```
+
+Fix every reported failure, then remove the Lab 3 resources and preserve the teardown gate:
+
+```bash
+bash scripts/teardown-lab3.sh
+```
+
+The teardown script writes `docs/lab3-teardown-output.txt`. The serverless MLflow App is retained for later labs.

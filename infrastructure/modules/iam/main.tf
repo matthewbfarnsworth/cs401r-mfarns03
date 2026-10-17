@@ -59,7 +59,8 @@ resource "aws_iam_policy" "ml_engineer" {
           "sagemaker:CreateEndpointConfig", "sagemaker:DeleteEndpointConfig",
           "sagemaker:CreateMlflowApp", "sagemaker:DescribeMlflowApp", "sagemaker:ListMlflowApps",
           "sagemaker:CreatePresignedMlflowAppUrl",
-          "sagemaker:RegisterModel", "sagemaker:DescribeModelPackage", "sagemaker:ListModelPackages"
+          "sagemaker:CreateModelPackage", "sagemaker:DescribeModelPackage", "sagemaker:ListModelPackages",
+          "sagemaker:CreateModelPackageGroup", "sagemaker:DescribeModelPackageGroup", "sagemaker:ListModelPackageGroups"
         ],
         "Resource" : "*"
       },

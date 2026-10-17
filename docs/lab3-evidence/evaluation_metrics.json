@@ -1,0 +1,21 @@
+{
+  "auc_roc": 0.778495855995856,
+  "precision_top10": 0.7066666666666667,
+  "recall_top10": 0.3212121212121212,
+  "auc_vs_baseline": 0.05520202020202036,
+  "baseline_auc": 0.7232938357938357,
+  "lift_ci_low": 0.03539749885083202,
+  "lift_ci_high": 0.07273643262939455,
+  "positive_rate_val": 0.22,
+  "n_val_samples": 3000,
+  "top10_probability_threshold": 0.6568813323974609,
+  "top10_selected_count": 300,
+  "top10_true_positives": 212,
+  "top10_selected_rate": 0.1,
+  "eval_timestamp": "2026-10-17T17:49:58.587729",
+  "passed_gates": 1,
+  "gate_failure_count": 0,
+  "evaluation_split": "final_test",
+  "n_test_samples": 3000,
+  "mlflow_run_id": "19c1bc4e633243329546e03bfe2f4641"
+}

@@ -20,9 +20,9 @@ Usage (local testing):
     python churn_training_skeleton.py \
         --feature-group-name northstar-dev-customer-features \
         --artifacts-bucket northstar-dev-data-<account> \
-        --max-depth 6 --eta 0.1 --num-round 200 \
+        --winner-config output/tuning/tuning-winner.json \
         --mlflow-arn arn:aws:sagemaker:us-east-1:<account>:mlflow-app/app-XXXX \
-        --run-name xgb-depth6-eta0.1
+        --run-name xgb-final
 
 Usage (SageMaker training job — parameters passed via hyperparameter dict):
     Configured via the SageMaker Python SDK Estimator.
@@ -32,6 +32,8 @@ import argparse
 import json
 import os
 import pickle
+import tarfile
+import tempfile
 from datetime import datetime, timezone
 
 import boto3
@@ -53,6 +55,7 @@ except ImportError:
     print("WARNING: sagemaker not installed — running in local test mode")
 else:
     try:
+        from sagemaker import image_uris
         from sagemaker.feature_store.feature_group import FeatureGroup
         from sagemaker.session import Session
         SAGEMAKER_AVAILABLE = True
@@ -134,6 +137,27 @@ def parse_args():
                         help="Name for this run. Make it descriptive -- 'run3' tells "
                              "you nothing three weeks later.")
 
+    parser.add_argument(
+        "--winner-config",
+        type=str,
+        required=True,
+        help=(
+            "Path to tuning-winner.json produced by churn_tuning.py. The final "
+            "model is retrained on the full 70%% development split using this "
+            "configuration and its best number of boosting rounds."
+        ),
+    )
+    parser.add_argument(
+        "--model-package-group",
+        default="northstar-churn-models",
+        help="SageMaker Model Registry package group required by later labs",
+    )
+    parser.add_argument(
+        "--skip-registration",
+        action="store_true",
+        help="Development only: save local artifacts without uploading/registering",
+    )
+
     parser.add_argument("--model-dir", type=str,
                         default=os.environ.get("SM_MODEL_DIR", "./model"))
     parser.add_argument("--output-data-dir", type=str,
@@ -206,7 +230,8 @@ def load_features_from_feature_store(feature_group_name: str,
             will not run a query without an output location, so this has to be
             threaded in from --artifacts-bucket rather than assumed.
 
-    TODO: Implement this function to pull training data from your Lab 2 Feature Store.
+    The query is executed through the Feature Store Athena helper so the
+    resulting QueryExecutionId can be preserved as grading evidence.
     Reference: https://docs.aws.amazon.com/sagemaker/latest/dg/feature-store-use-with-studio.html
     """
     if not SAGEMAKER_AVAILABLE:
@@ -222,8 +247,6 @@ def load_features_from_feature_store(feature_group_name: str,
     session = Session()
     feature_group = FeatureGroup(name=feature_group_name, sagemaker_session=session)
 
-    # TODO: Execute this query and return the result as a DataFrame.
-    #
     # Two things in the query below are easy to get wrong, so read them:
     #
     # 1. event_time is Fractional - Unix epoch SECONDS, not an ISO string.
@@ -299,12 +322,14 @@ def load_features_from_feature_store(feature_group_name: str,
         ORDER BY customer_id
     """
 
-    # query.run(query_string=query_string,
-    #           output_location=f"s3://{artifacts_bucket}/artifacts/athena-results/")
-    # query.wait()
-    # df = query.as_dataframe()
-    # return df
-    raise NotImplementedError("TODO: Implement Feature Store query")
+    query.run(
+        query_string=query_string,
+        output_location=f"s3://{artifacts_bucket}/artifacts/athena-results/",
+    )
+    query_execution = query.get_query_execution()["QueryExecution"]
+    print(f"Athena QueryExecutionId: {query_execution['QueryExecutionId']}")
+    query.wait()
+    return query.as_dataframe()
 
 
 def load_features_local(path: str) -> pd.DataFrame:
@@ -334,11 +359,9 @@ def preprocess_features(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     # Drop rows where label is missing
     df = df.dropna(subset=[LABEL_COLUMN])
 
-    # TODO: Handle missing values in features
-    # XGBoost can handle NaN natively, but document your imputation strategy.
-    # For features with business-meaningful nulls (e.g., clickstream for non-web customers),
-    # consider median imputation or a sentinel value.
-    X = df[FEATURE_COLUMNS].fillna(-1).values  # Sentinel -1 for missing
+    # Sentinel -1 preserves the distinction between a missing behavioral value
+    # and a measured zero without learning imputation statistics from the test set.
+    X = df[FEATURE_COLUMNS].fillna(-1).values
     y = df[LABEL_COLUMN].values.astype(int)
 
     print(f"  Positive class rate: {y.mean():.1%}")
@@ -349,16 +372,8 @@ def preprocess_features(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
 
 # ── Model Training ─────────────────────────────────────────────────────────────
 
-def train_model(X_train: np.ndarray,
-                y_train: np.ndarray,
-                X_val: np.ndarray,
-                y_val: np.ndarray,
-                args) -> xgb.Booster:
-    """Train the XGBoost churn model."""
-
-    dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=FEATURE_COLUMNS)
-    dval = xgb.DMatrix(X_val, label=y_val, feature_names=FEATURE_COLUMNS)
-
+def build_xgb_params(args, y_train: np.ndarray) -> dict:
+    """Build XGBoost parameters and record the resolved class weight."""
     # Class imbalance, computed from the training split rather than hardcoded.
     # On the reference dataset this lands at 3.545.
     spw = (args.scale_pos_weight if args.scale_pos_weight is not None
@@ -371,7 +386,7 @@ def train_model(X_train: np.ndarray,
     # precision/recall difference between runs.
     args.resolved_scale_pos_weight = spw
 
-    params = {
+    return {
         # eval_metric ORDER MATTERS. XGBoost early-stops on the LAST metric in
         # this list, not the first. This used to read ["auc", "logloss"], which
         # silently made logloss the early-stopping criterion: under
@@ -393,18 +408,54 @@ def train_model(X_train: np.ndarray,
         "verbosity": 1,
     }
 
+
+def train_model(X_train: np.ndarray,
+                y_train: np.ndarray,
+                args,
+                X_val: np.ndarray = None,
+                y_val: np.ndarray = None) -> xgb.Booster:
+    """Train XGBoost, using validation and early stopping only when provided."""
+    if (X_val is None) != (y_val is None):
+        raise ValueError("X_val and y_val must either both be provided or both be omitted")
+
+    dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=FEATURE_COLUMNS)
+    params = build_xgb_params(args, y_train)
+
     print(f"\nTraining XGBoost with params: {json.dumps(params, indent=2)}")
+
+    evals = [(dtrain, "train")]
+    training_options = {}
+    if X_val is not None:
+        dval = xgb.DMatrix(X_val, label=y_val, feature_names=FEATURE_COLUMNS)
+        evals.append((dval, "validation"))
+        training_options["early_stopping_rounds"] = 20
 
     model = xgb.train(
         params=params,
         dtrain=dtrain,
         num_boost_round=args.num_round,
-        evals=[(dtrain, "train"), (dval, "validation")],
-        early_stopping_rounds=20,
+        evals=evals,
         verbose_eval=25,
+        **training_options,
     )
 
     return model
+
+
+def predict_model(model: xgb.Booster, data: xgb.DMatrix) -> np.ndarray:
+    """Predict with the early-stopping winner, or all rounds after final retraining."""
+    if hasattr(model, "best_iteration"):
+        return model.predict(
+            data,
+            iteration_range=(0, model.best_iteration + 1),
+        )
+    return model.predict(data)
+
+
+def top10_selection(y_pred_proba: np.ndarray) -> tuple[float, np.ndarray]:
+    """Return the agreed global 90th-percentile cutoff and inclusive mask."""
+    threshold = float(np.percentile(y_pred_proba, 90))
+    return threshold, y_pred_proba >= threshold
 
 
 # ── Evaluation ─────────────────────────────────────────────────────────────────
@@ -499,22 +550,32 @@ def bootstrap_lift_ci(y_true: np.ndarray,
 def evaluate_model(model: xgb.Booster,
                    X_val: np.ndarray,
                    y_val: np.ndarray,
-                   baseline_proba: np.ndarray) -> dict:
+                   baseline_proba: np.ndarray,
+                   enforce_thresholds: bool = True) -> dict:
     """
     Evaluate the trained model against required thresholds.
-    Returns a metrics dict. Raises ValueError if thresholds are not met.
+
+    Metrics are returned at full precision; round only when displaying them.
+    Tuning calls this with enforce_thresholds=False so every attempted
+    configuration can still be logged to MLflow. Final evaluation keeps the
+    default True so a failed gate blocks registration.
     """
     dval = xgb.DMatrix(X_val, feature_names=FEATURE_COLUMNS)
-    y_pred_proba = model.predict(dval)
-    y_pred_binary = (y_pred_proba > 0.5).astype(int)
+    y_pred_proba = predict_model(model, dval)
 
     auc_roc = roc_auc_score(y_val, y_pred_proba)
 
     # Precision and recall @ top 10%
-    top10_threshold = np.percentile(y_pred_proba, 90)
-    top10_mask = y_pred_proba >= top10_threshold
-    precision_top10 = y_val[top10_mask].mean() if top10_mask.sum() > 0 else 0.0
-    recall_top10 = y_val[top10_mask].sum() / y_val.sum() if y_val.sum() > 0 else 0.0
+    top10_threshold, top10_mask = top10_selection(y_pred_proba)
+    top10_true_positives = int(y_val[top10_mask].sum())
+    precision_top10 = (
+        top10_true_positives / top10_mask.sum()
+        if top10_mask.sum() > 0
+        else 0.0
+    )
+    recall_top10 = (
+        top10_true_positives / y_val.sum() if y_val.sum() > 0 else 0.0
+    )
 
     # Baseline: a model trained on days_since_last_purchase ALONE.
     #
@@ -531,15 +592,19 @@ def evaluate_model(model: xgb.Booster,
         y_val, y_pred_proba, baseline_proba)
 
     metrics = {
-        "auc_roc": round(float(auc_roc), 4),
-        "precision_top10": round(float(precision_top10), 4),
-        "recall_top10": round(float(recall_top10), 4),
-        "auc_vs_baseline": round(float(auc_vs_baseline), 4),
-        "baseline_auc": round(float(baseline_auc), 4),
-        "lift_ci_low": round(float(lift_ci_low), 4),
-        "lift_ci_high": round(float(lift_ci_high), 4),
-        "positive_rate_val": round(float(y_val.mean()), 4),
+        "auc_roc": float(auc_roc),
+        "precision_top10": float(precision_top10),
+        "recall_top10": float(recall_top10),
+        "auc_vs_baseline": float(auc_vs_baseline),
+        "baseline_auc": float(baseline_auc),
+        "lift_ci_low": float(lift_ci_low),
+        "lift_ci_high": float(lift_ci_high),
+        "positive_rate_val": float(y_val.mean()),
         "n_val_samples": int(len(y_val)),
+        "top10_probability_threshold": top10_threshold,
+        "top10_selected_count": int(top10_mask.sum()),
+        "top10_true_positives": top10_true_positives,
+        "top10_selected_rate": float(top10_mask.mean()),
         "eval_timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -561,17 +626,20 @@ def evaluate_model(model: xgb.Booster,
             f"auc_lift 95% CI [{lift_ci_low:.4f}, {lift_ci_high:.4f}] includes "
             f"zero - no evidence the model beats the recency-only baseline")
 
+    metrics["passed_gates"] = int(not failures)
+    metrics["gate_failure_count"] = len(failures)
+
     if failures:
-        raise ValueError(
+        failure_message = (
             f"Model failed evaluation thresholds: {'; '.join(failures)}. "
             f"Do not promote to Model Registry."
         )
+        if enforce_thresholds:
+            raise ValueError(failure_message)
+        print(f"  Gates failed; recording this tuning run without promotion.")
+        return metrics
 
     print("  All thresholds passed ✓")
-
-    # TODO (Lab 3): Add slice evaluation
-    # Evaluate AUC and recall separately for each loyalty_tier and flag
-    # any segment where recall drops more than 10pp below aggregate recall.
 
     return metrics
 
@@ -581,30 +649,128 @@ def evaluate_model(model: xgb.Booster,
 def evaluate_slices(model: xgb.Booster,
                     X_val: np.ndarray,
                     y_val: np.ndarray,
-                    slice_column: pd.Series) -> dict:
+                    slice_column: pd.Series) -> list[dict]:
     """
-    Evaluate model performance by slice (e.g., loyalty_tier, age_band).
-    Flag slices where recall@10% drops more than 10pp below aggregate.
+    Evaluate AUC and recall for each loyalty tier on the final test set.
 
-    TODO: Implement this function in Lab 3.
+    Recall uses the same global top-10% contact list as the aggregate rubric
+    metric. A tier is too small for a conclusion when it contains fewer than
+    20 positives OR fewer than 20 negatives, per the chosen rule.
     """
+    tiers = pd.Series(slice_column).reset_index(drop=True)
+    if len(tiers) != len(y_val):
+        raise ValueError("Slice labels must align one-for-one with evaluation rows")
+
     dval = xgb.DMatrix(X_val, feature_names=FEATURE_COLUMNS)
-    y_pred_proba = model.predict(dval)
-    aggregate_recall = None  # TODO: compute
+    y_pred_proba = predict_model(model, dval)
+    top10_threshold, top10_mask = top10_selection(y_pred_proba)
+    aggregate_recall = (
+        float(y_val[top10_mask].sum() / y_val.sum()) if y_val.sum() else 0.0
+    )
 
-    slice_results = {}
-    for slice_value in slice_column.unique():
-        mask = (slice_column == slice_value).values
-        # TODO: compute recall@10% for this slice
-        # Flag if recall < aggregate_recall - 0.10
-        pass
+    slice_results = []
+    for slice_value in sorted(tiers.dropna().unique()):
+        slice_mask = (tiers == slice_value).to_numpy()
+        slice_y = y_val[slice_mask]
+        slice_proba = y_pred_proba[slice_mask]
+        positives = int(slice_y.sum())
+        negatives = int(len(slice_y) - positives)
+        selected_positives = int(y_val[slice_mask & top10_mask].sum())
+        recall = float(selected_positives / positives) if positives else 0.0
+        slice_auc = (
+            float(roc_auc_score(slice_y, slice_proba))
+            if positives and negatives
+            else None
+        )
+        slice_results.append({
+            "tier": str(slice_value),
+            "n": int(len(slice_y)),
+            "positives": positives,
+            "negatives": negatives,
+            "auc": slice_auc,
+            "recall": recall,
+            "aggregate_recall": aggregate_recall,
+            "recall_gap_vs_aggregate": recall - aggregate_recall,
+            "recall_drop_over_10pp": int(recall < aggregate_recall - 0.10),
+            "too_small_to_conclude": int(positives < 20 or negatives < 20),
+            "global_top10_threshold": top10_threshold,
+        })
 
+    if slice_results:
+        weakest_recall = min(row["recall"] for row in slice_results)
+        for row in slice_results:
+            row["weakest_tier_by_recall"] = int(
+                np.isclose(row["recall"], weakest_recall)
+            )
+
+    return slice_results
+
+
+def save_evaluation_artifacts(model: xgb.Booster,
+                              X_test: np.ndarray,
+                              y_test: np.ndarray,
+                              test_tiers: pd.Series,
+                              output_dir: str) -> list[dict]:
+    """Write the three fixed-name Task 1 evaluation artifacts."""
+    os.makedirs(output_dir, exist_ok=True)
+    mpl_cache = os.path.join(tempfile.gettempdir(), "northstar-matplotlib")
+    os.makedirs(mpl_cache, exist_ok=True)
+    os.environ.setdefault("MPLCONFIGDIR", mpl_cache)
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
+
+    dtest = xgb.DMatrix(X_test, feature_names=FEATURE_COLUMNS)
+    y_pred_proba = predict_model(model, dtest)
+    threshold, selected = top10_selection(y_pred_proba)
+    y_pred = selected.astype(int)
+
+    matrix = confusion_matrix(y_test, y_pred, labels=[0, 1])
+    display = ConfusionMatrixDisplay(
+        confusion_matrix=matrix,
+        display_labels=["Not churn", "Churn"],
+    )
+    display.plot(cmap="Blues", colorbar=False)
+    display.ax_.set_title(
+        f"Final Test Confusion Matrix\nGlobal top-10% cutoff = {threshold:.4f}"
+    )
+    plt.tight_layout()
+    confusion_path = os.path.join(output_dir, "confusion-matrix.png")
+    plt.savefig(confusion_path, dpi=160, bbox_inches="tight")
+    plt.close()
+
+    gains = model.get_score(importance_type="gain")
+    importance = pd.DataFrame({
+        "feature": FEATURE_COLUMNS,
+        "gain": [float(gains.get(feature, 0.0)) for feature in FEATURE_COLUMNS],
+    }).sort_values("gain", ascending=True)
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.barh(importance["feature"], importance["gain"], color="#2f6f9f")
+    ax.set_xlabel("Gain")
+    ax.set_title("XGBoost Feature Importance — Final Registered Model")
+    fig.tight_layout()
+    importance_path = os.path.join(output_dir, "feature-importance.png")
+    fig.savefig(importance_path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+
+    slice_results = evaluate_slices(model, X_test, y_test, test_tiers)
+    slices_path = os.path.join(output_dir, "slice-evaluation.csv")
+    pd.DataFrame(slice_results).to_csv(slices_path, index=False)
+
+    print(f"✓ Confusion matrix: {confusion_path}")
+    print(f"✓ Feature importance: {importance_path}")
+    print(f"✓ Slice evaluation: {slices_path}")
     return slice_results
 
 
 # ── Experiment Tracking (MLflow App) ───────────────────────────────────────────
 
-def track_run(args, metrics: dict, scale_pos_weight: float) -> None:
+def track_run(args,
+              metrics: dict,
+              scale_pos_weight: float,
+              tags: dict | None = None) -> str | None:
     """
     Log this training run to your SageMaker MLflow App.
 
@@ -635,34 +801,37 @@ def track_run(args, metrics: dict, scale_pos_weight: float) -> None:
          is the SigV4 auth plugin for arn:aws:sagemaker:... tracking URIs.
          Without it you get a connection error that never mentions credentials.
 
-    TODO: Implement this function.
+    Returns the MLflow run ID, or None when tracking was explicitly omitted.
     """
     if not args.mlflow_arn:
         print("\n(no --mlflow-arn given; skipping experiment tracking)")
         return
 
-    # TODO: log this run to the MLflow App.
-    #
-    # import mlflow
-    #
-    # mlflow.set_tracking_uri(args.mlflow_arn)   # the App ARN, verbatim
-    # mlflow.set_experiment(args.mlflow_experiment)
-    #
-    # with mlflow.start_run(run_name=args.run_name):
-    #     mlflow.log_params({
-    #         "max_depth": args.max_depth,
-    #         "eta": args.eta,
-    #         "num_round": args.num_round,
-    #         "min_child_weight": args.min_child_weight,
-    #         "subsample": args.subsample,
-    #         "colsample_bytree": args.colsample_bytree,
-    #         "scale_pos_weight": scale_pos_weight,
-    #         "xgboost_version": xgb.__version__,   # see below -- this matters
-    #     })
-    #     mlflow.log_metrics({
-    #         k: v for k, v in metrics.items() if isinstance(v, (int, float))
-    #     })
-    #
+    import mlflow
+
+    mlflow.set_tracking_uri(args.mlflow_arn)   # the App ARN, verbatim
+    mlflow.set_experiment(args.mlflow_experiment)
+
+    with mlflow.start_run(run_name=args.run_name) as run:
+        mlflow.log_params({
+            "max_depth": args.max_depth,
+            "eta": args.eta,
+            "num_round": args.num_round,
+            "min_child_weight": args.min_child_weight,
+            "subsample": args.subsample,
+            "colsample_bytree": args.colsample_bytree,
+            "scale_pos_weight": scale_pos_weight,
+            "xgboost_version": xgb.__version__,
+        })
+        mlflow.log_metrics({
+            k: float(v)
+            for k, v in metrics.items()
+            if isinstance(v, (int, float, np.integer, np.floating))
+        })
+        if tags:
+            mlflow.set_tags(tags)
+        run_id = run.info.run_id
+
     # LOG THE XGBOOST VERSION AS A PARAM. Lab 3 documents that identical data
     # and an identical split produce different metrics on XGBoost 3.2.0 vs 1.7
     # (the SageMaker training container is 1.7). If you train some runs locally
@@ -674,14 +843,15 @@ def track_run(args, metrics: dict, scale_pos_weight: float) -> None:
     # it earns 2 of 5. Vary something you can defend, and be able to say what
     # the variation did to the metrics.
 
-    print("TODO: Log run to MLflow App (see comments above)")
+    print(f"✓ MLflow run logged: {run_id}")
+    return run_id
 
 
 # ── Model Saving & Registry ────────────────────────────────────────────────────
 
 def save_and_register_model(model: xgb.Booster,
                              metrics: dict,
-                             args) -> None:
+                             args) -> str | None:
     """
     Save the model artifact and register it in SageMaker Model Registry.
     Status is set to PendingManualApproval — human approval required before deployment.
@@ -708,31 +878,158 @@ def save_and_register_model(model: xgb.Booster,
     with open(os.path.join(args.model_dir, "model_metadata.json"), "w") as f:
         json.dump(metadata, f, indent=2)
 
-    # TODO: Register in SageMaker Model Registry
-    # The model package group must be "northstar-churn-models" -- Lab 5 deploys
-    # from that group by name, so any other name breaks Lab 5.
-    # Include the evaluation metrics in the model card / description
-    # Status must be "PendingManualApproval" — never "Approved" from this script
-    #
-    # sm_client = boto3.client("sagemaker")
-    # sm_client.create_model_package(
-    #     ModelPackageGroupName="northstar-churn-models",
-    #     ModelPackageDescription=f"Churn model trained {datetime.utcnow().date()}",
-    #     InferenceSpecification={...},
-    #     ModelApprovalStatus="PendingManualApproval",
-    #     CustomerMetadataProperties={
-    #         k: str(v) for k, v in metrics.items()
-    #     },
-    # )
-    print("TODO: Register model in SageMaker Model Registry (see comments above)")
+    archive_path = os.path.join(args.model_dir, "model.tar.gz")
+    with tarfile.open(archive_path, "w:gz") as archive:
+        # SageMaker's built-in XGBoost inference container expects this name.
+        archive.add(model_path, arcname="xgboost-model")
+        archive.add(
+            os.path.join(args.model_dir, "model_metadata.json"),
+            arcname="model_metadata.json",
+        )
+    print(f"✓ Model archive saved to {archive_path}")
+
+    if args.skip_registration:
+        print("(development mode: skipping S3 upload and Model Registry)")
+        return None
+    if not args.artifacts_bucket:
+        raise ValueError("--artifacts-bucket is required for Model Registry upload")
+    if not SAGEMAKER_AVAILABLE:
+        raise RuntimeError("SageMaker SDK is required to resolve the inference image")
+
+    aws_session = boto3.Session()
+    region = aws_session.region_name or "us-east-1"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    model_key = f"artifacts/lab3/models/{timestamp}/model.tar.gz"
+    aws_session.client("s3").upload_file(
+        archive_path,
+        args.artifacts_bucket,
+        model_key,
+    )
+    model_data_url = f"s3://{args.artifacts_bucket}/{model_key}"
+    print(f"✓ Model archive uploaded to {model_data_url}")
+
+    sm_client = aws_session.client("sagemaker")
+    groups = sm_client.list_model_package_groups(
+        NameContains=args.model_package_group,
+        MaxResults=100,
+    )["ModelPackageGroupSummaryList"]
+    if not any(
+        group["ModelPackageGroupName"] == args.model_package_group
+        for group in groups
+    ):
+        sm_client.create_model_package_group(
+            ModelPackageGroupName=args.model_package_group,
+            ModelPackageGroupDescription="NorthStar churn models",
+        )
+        print(f"✓ Created model package group: {args.model_package_group}")
+
+    inference_image = image_uris.retrieve(
+        framework="xgboost",
+        region=region,
+        version="1.7-1",
+        py_version="py3",
+        instance_type="ml.m5.large",
+        image_scope="inference",
+    )
+    registry_metric_keys = (
+        "auc_roc",
+        "precision_top10",
+        "recall_top10",
+        "baseline_auc",
+        "auc_vs_baseline",
+        "lift_ci_low",
+        "lift_ci_high",
+    )
+    customer_metadata = {
+        key: str(metrics[key])
+        for key in registry_metric_keys
+        if key in metrics
+    }
+    customer_metadata["xgboost_version"] = xgb.__version__
+    if metrics.get("mlflow_run_id"):
+        customer_metadata["mlflow_run_id"] = str(metrics["mlflow_run_id"])
+
+    response = sm_client.create_model_package(
+        ModelPackageGroupName=args.model_package_group,
+        ModelPackageDescription=(
+            f"NorthStar churn model; final test AUC={metrics['auc_roc']:.4f}; "
+            f"trained {datetime.now(timezone.utc).date()}"
+        ),
+        InferenceSpecification={
+            "Containers": [{
+                "Image": inference_image,
+                "ModelDataUrl": model_data_url,
+            }],
+            "SupportedContentTypes": ["text/csv"],
+            "SupportedResponseMIMETypes": ["text/csv"],
+        },
+        ModelApprovalStatus="PendingManualApproval",
+        CustomerMetadataProperties=customer_metadata,
+    )
+    package_arn = response["ModelPackageArn"]
+    print(f"✓ Registered PendingManualApproval model: {package_arn}")
+    return package_arn
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
+
+def apply_winner_config(args) -> dict:
+    """Load and apply the unique validation winner produced by the tuner."""
+    with open(args.winner_config) as handle:
+        winner = json.load(handle)
+
+    required = (
+        "max_depth",
+        "min_child_weight",
+        "subsample",
+        "colsample_bytree",
+        "eta",
+        "effective_num_round",
+        "passed_gates",
+    )
+    missing = [key for key in required if key not in winner]
+    if missing:
+        raise ValueError(f"Winner configuration is missing fields: {missing}")
+    if int(winner["passed_gates"]) != 1:
+        raise ValueError("Refusing to retrain a tuning configuration that failed validation gates")
+
+    args.max_depth = int(winner["max_depth"])
+    args.min_child_weight = int(winner["min_child_weight"])
+    args.subsample = float(winner["subsample"])
+    args.colsample_bytree = float(winner["colsample_bytree"])
+    args.eta = float(winner["eta"])
+    args.num_round = int(winner["effective_num_round"])
+    if args.num_round < 1:
+        raise ValueError("Winner effective_num_round must be at least 1")
+    if not args.run_name:
+        args.run_name = f"final-from-{winner.get('run_name', 'tuning-winner')}"
+
+    print(f"Loaded validation winner: {args.winner_config}")
+    print(
+        "Final retraining will use "
+        f"depth={args.max_depth}, child_weight={args.min_child_weight}, "
+        f"subsample={args.subsample}, colsample={args.colsample_bytree}, "
+        f"eta={args.eta}, rounds={args.num_round}"
+    )
+    return winner
+
 
 def main():
     args = parse_args()
     os.makedirs(args.model_dir, exist_ok=True)
     os.makedirs(args.output_data_dir, exist_ok=True)
+
+    winner = apply_winner_config(args)
+    if not args.skip_registration and args.local_data_path:
+        raise ValueError(
+            "The registered graded run must use Feature Store/Athena, not --local-data-path. "
+            "Use --skip-registration only for development."
+        )
+    if not args.skip_registration and not args.mlflow_arn:
+        raise ValueError(
+            "The graded run must be tracked in the MLflow App before registration. "
+            "Supply --mlflow-arn or set MLFLOW_APP_ARN."
+        )
 
     print("=" * 60)
     print("NorthStar Churn Prediction — Training Script")
@@ -741,6 +1038,7 @@ def main():
     # 1. Load features
     if args.local_data_path:
         df = load_features_local(args.local_data_path)
+        data_source = "local-development"
     else:
         df = load_features_from_feature_store(
             args.feature_group_name,
@@ -748,49 +1046,78 @@ def main():
             args.training_end_date,
             args.artifacts_bucket,
         )
+        data_source = "feature-store-athena"
+
+    if SLICE_COLUMN not in df.columns:
+        raise ValueError(
+            f"Final evaluation requires '{SLICE_COLUMN}' for the rubric slice analysis"
+        )
+    df = df.dropna(subset=[LABEL_COLUMN]).reset_index(drop=True)
 
     # 2. Preprocess
     X, y = preprocess_features(df)
 
-    # 3. Train/validation split (temporal split is better — split by customer_id here for simplicity)
+    # 3. Final 70/30 train/test split. The tuner used only the 70% development
+    # portion; this is the one and only evaluation of the held-out 30% test set.
     # test_size=0.30 matches the reference run and every published figure in
     # Lab 3 (6,999 train / 3,000 test on the 10k dataset). The bootstrap lift CI
     # is calibrated on a test set that size; a 0.20 split leaves 2,000 rows and
     # widens the interval enough to matter.
     #
-    # TODO (Task 1): to run evaluate_slices() you need the tier for each
-    # validation row. Pass df[SLICE_COLUMN] as a third array to this same call
-    # and it is split on the identical indices:
-    #   X_train, X_val, y_train, y_val, tier_train, tier_val = train_test_split(
-    #       X, y, df[SLICE_COLUMN], test_size=0.30, random_state=42, stratify=y)
-    # Re-deriving the tiers afterwards from df will NOT line up.
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.30, random_state=42, stratify=y
+    X_train, X_test, y_train, y_test, _tier_train, tier_test = train_test_split(
+        X,
+        y,
+        df[SLICE_COLUMN],
+        test_size=0.30,
+        random_state=42,
+        stratify=y,
     )
-    print(f"\nTrain: {len(X_train):,} | Validation: {len(X_val):,}")
+    print(f"\nFinal train: {len(X_train):,} | Final held-out test: {len(X_test):,}")
 
-    # 4. Train
-    model = train_model(X_train, y_train, X_val, y_val, args)
+    # 4. Retrain the validation winner on the full 70% development split.
+    model = train_model(X_train, y_train, args)
 
-    # 5. Evaluate
-    baseline_proba = train_recency_baseline(X_train, y_train, X_val)
-    metrics = evaluate_model(model, X_val, y_val, baseline_proba)
+    # 5. Evaluate the final test set once, with strict promotion gates.
+    baseline_proba = train_recency_baseline(X_train, y_train, X_test)
+    metrics = evaluate_model(model, X_test, y_test, baseline_proba)
+    metrics["evaluation_split"] = "final_test"
+    metrics["n_test_samples"] = int(len(y_test))
+    save_evaluation_artifacts(
+        model,
+        X_test,
+        y_test,
+        tier_test,
+        args.output_data_dir,
+    )
 
-    # 6. Save and register
-    save_and_register_model(model, metrics, args)
+    # 6. Log the final run. It must exist before the same model is registered.
+    final_tags = {
+        "phase": "final",
+        "data_source": data_source,
+        "split": "70-train_30-final-test",
+    }
+    if winner.get("mlflow_run_id"):
+        final_tags["source_tuning_run_id"] = str(winner["mlflow_run_id"])
+    mlflow_run_id = track_run(
+        args,
+        metrics,
+        getattr(args, "resolved_scale_pos_weight", None),
+        tags=final_tags,
+    )
+    if mlflow_run_id:
+        metrics["mlflow_run_id"] = mlflow_run_id
 
-    # 7. Track this run in your MLflow App (Task 1, 5 pts)
-    track_run(args, metrics, getattr(args, "resolved_scale_pos_weight", None))
-
-    # 8. Write metrics to output. SageMaker also collects these as job output;
-    #    that is job lineage, NOT experiment tracking. It records that a job
-    #    ran, not what you varied or why. Step 7 is the graded one.
+    # 7. Write the exact metrics used by MLflow and Model Registry.
     metrics_path = os.path.join(args.output_data_dir, "evaluation_metrics.json")
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
+    print(f"✓ Evaluation metrics: {metrics_path}")
+
+    # 8. Save, upload, and register only after every strict evaluation gate passes.
+    save_and_register_model(model, metrics, args)
 
     print("\n" + "=" * 60)
-    print(f"Training complete. AUC-ROC: {metrics['auc_roc']:.4f}")
+    print(f"Final training complete. Test AUC-ROC: {metrics['auc_roc']:.4f}")
     print("=" * 60)
 
 

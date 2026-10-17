@@ -1,0 +1,35 @@
+==> Lab 3 evidence  (track C, us-east-1)
+[1/5] Identity
+  OK    account 182243447601  --  arn:aws:iam::182243447601:user/cs401r-lab
+[2/5] Evidence files
+  OK    docs/lab3-evidence/train-final.log
+  OK    docs/lab3-evidence/evaluation_metrics.json
+  OK    docs/lab3-evidence/slice-evaluation.csv
+  OK    docs/lab3-evidence/confusion-matrix.png
+  OK    docs/lab3-evidence/feature-importance.png
+  OK    docs/lab3-evaluation-report.md
+  OK    docs/lab3-model-design.md
+  OK    docs/bedrock-access-verification.txt
+  FAIL  notebooks/lab3-demo.ipynb  --  missing or empty -- Task 2: committed WITH outputs from one clean Restart & Run All
+  FAIL  docs/lab3-evidence/agent_eval.csv  --  missing or empty -- Task 2C: evaluation_harness.py --track C output, renamed
+  FAIL  docs/lab3-evidence/agent-traces.jsonl  --  missing or empty -- Task 2C: one JSON line per tool call (tool, input, output, latency_ms)
+  FAIL  docs/lab3-evidence/agent-cost.csv  --  missing or empty -- Task 2C: tokens and cost per run
+  FAIL  docs/lab3-evidence/track-c-failures.md  --  missing or empty -- Task 2C: >=2 failure modes, each with a concrete fix
+  FAIL  docs/lab3-evidence/policy-tests.json  --  missing or empty -- Task 2C: python agent/policy_tests.py (the $50 cap, enforced at the gateway)
+[3/5] Content checks
+  OK    gate precision_top10 >= 0.50
+  OK    gate recall_top10 >= 0.25
+  OK    gate lift 95% CI excludes zero
+  OK    slice-evaluation.csv  --  4 tiers
+[4/5] AWS exports: Athena, MLflow, Model Registry, AgentCore
+  OK    Athena query  --  6c5337aa-ee4e-4775-823f-d11b1b220996 SUCCEEDED, 682218 bytes scanned
+  OK    MLflow App reuses Lab 1 infrastructure  --  northstar-dev-MLEngineer, s3://northstar-dev-data-182243447601/artifacts/mlflow/
+  OK    MLflow runs  --  163 runs with params and metrics in 'northstar-churn'
+  OK    MLflow runs vary  --  max_depth, min_child_weight, subsample, scale_pos_weight, colsample_bytree, num_round
+  OK    consistency: MLflow  --  a tracked run matches auc_roc=0.778495855995856
+  OK    Model Registry  --  1 PendingManualApproval version(s); latest v1
+  OK    consistency: registry  --  v1 metadata matches evaluation_metrics.json
+  FAIL  AgentCore harness  --  none found. Run this BEFORE teardown, while the stack is up
+[5/5] Summary
+  20 OK, 0 WARN, 7 FAIL
+  Fix every FAIL, re-run, then teardown -> commit -> tag.

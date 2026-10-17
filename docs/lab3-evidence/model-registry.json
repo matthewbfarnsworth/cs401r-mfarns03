@@ -1,0 +1,23 @@
+{
+  "ModelPackageGroupName": "northstar-churn-models",
+  "Versions": [
+    {
+      "ModelPackageArn": "arn:aws:sagemaker:us-east-1:182243447601:model-package/northstar-churn-models/1",
+      "ModelPackageVersion": 1,
+      "ModelApprovalStatus": "PendingManualApproval",
+      "CreationTime": "2026-10-17 11:50:04.544000-06:00",
+      "ModelPackageDescription": "NorthStar churn model; final test AUC=0.7785; trained 2026-10-17",
+      "CustomerMetadataProperties": {
+        "auc_roc": "0.778495855995856",
+        "auc_vs_baseline": "0.05520202020202036",
+        "baseline_auc": "0.7232938357938357",
+        "lift_ci_high": "0.07273643262939455",
+        "lift_ci_low": "0.03539749885083202",
+        "mlflow_run_id": "19c1bc4e633243329546e03bfe2f4641",
+        "precision_top10": "0.7066666666666667",
+        "recall_top10": "0.3212121212121212",
+        "xgboost_version": "3.2.0"
+      }
+    }
+  ]
+}
