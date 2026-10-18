@@ -1,3 +1,4 @@
+2026/10/17 23:13:28 INFO mlflow.agent.hint: Load the `instrumenting-with-mlflow-tracing` skill at /Users/matthewbfarnsworth/projects/cs401r-mfarns03/.venv/lib/python3.13/site-packages/mlflow/assistant/skills/instrumenting-with-mlflow-tracing/SKILL.md before writing any tracing code; it ships with this MLflow install. Set MLFLOW_DISABLE_AGENT_HINT=1 to silence this.
 ==> Lab 3 evidence  (track C, us-east-1)
 [1/5] Identity
   OK    account 182243447601  --  arn:aws:iam::182243447601:user/cs401r-lab
@@ -10,26 +11,32 @@
   OK    docs/lab3-evaluation-report.md
   OK    docs/lab3-model-design.md
   OK    docs/bedrock-access-verification.txt
-  FAIL  notebooks/lab3-demo.ipynb  --  missing or empty -- Task 2: committed WITH outputs from one clean Restart & Run All
-  FAIL  docs/lab3-evidence/agent_eval.csv  --  missing or empty -- Task 2C: evaluation_harness.py --track C output, renamed
-  FAIL  docs/lab3-evidence/agent-traces.jsonl  --  missing or empty -- Task 2C: one JSON line per tool call (tool, input, output, latency_ms)
-  FAIL  docs/lab3-evidence/agent-cost.csv  --  missing or empty -- Task 2C: tokens and cost per run
-  FAIL  docs/lab3-evidence/track-c-failures.md  --  missing or empty -- Task 2C: >=2 failure modes, each with a concrete fix
-  FAIL  docs/lab3-evidence/policy-tests.json  --  missing or empty -- Task 2C: python agent/policy_tests.py (the $50 cap, enforced at the gateway)
+  OK    notebooks/lab3-demo.ipynb
+  OK    docs/lab3-evidence/agent_eval.csv
+  OK    docs/lab3-evidence/agent-traces.jsonl
+  OK    docs/lab3-evidence/agent-cost.csv
+  OK    docs/lab3-evidence/track-c-failures.md
+  OK    docs/lab3-evidence/policy-tests.json
 [3/5] Content checks
   OK    gate precision_top10 >= 0.50
   OK    gate recall_top10 >= 0.25
   OK    gate lift 95% CI excludes zero
   OK    slice-evaluation.csv  --  4 tiers
+  OK    demo notebook  --  5 code cells, one clean run, 5 with output
+  OK    agent-traces.jsonl  --  16 tool calls
+  OK    policy-tests.json  --  2 over-cap credits denied at the gateway
+  OK    agent_eval.csv  --  12 test cases (harness has 5+)
 [4/5] AWS exports: Athena, MLflow, Model Registry, AgentCore
   OK    Athena query  --  6c5337aa-ee4e-4775-823f-d11b1b220996 SUCCEEDED, 682218 bytes scanned
   OK    MLflow App reuses Lab 1 infrastructure  --  northstar-dev-MLEngineer, s3://northstar-dev-data-182243447601/artifacts/mlflow/
   OK    MLflow runs  --  163 runs with params and metrics in 'northstar-churn'
-  OK    MLflow runs vary  --  max_depth, min_child_weight, subsample, scale_pos_weight, colsample_bytree, num_round
+  OK    MLflow runs vary  --  colsample_bytree, scale_pos_weight, max_depth, min_child_weight, num_round, subsample
   OK    consistency: MLflow  --  a tracked run matches auc_roc=0.778495855995856
   OK    Model Registry  --  1 PendingManualApproval version(s); latest v1
   OK    consistency: registry  --  v1 metadata matches evaluation_metrics.json
-  FAIL  AgentCore harness  --  none found. Run this BEFORE teardown, while the stack is up
+  OK    harness northstar_agent  --  idle timeout 60s, 1 tool source(s)
+  OK    gateway northstar-tools-gw  --  policy engine mode ENFORCE
+  OK    policy engine northstar_agent_policies  --  2 policies
 [5/5] Summary
-  20 OK, 0 WARN, 7 FAIL
-  Fix every FAIL, re-run, then teardown -> commit -> tag.
+  33 OK, 0 WARN, 0 FAIL
+  Evidence complete. Next: bash scripts/teardown-lab3.sh, then commit and tag lab3-submit.

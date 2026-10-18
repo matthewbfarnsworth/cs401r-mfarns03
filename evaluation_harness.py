@@ -16,10 +16,8 @@ Usage:
         --rag-endpoint https://... \
         --test-cases tests/offer_test_cases.json
 
-    # Track C — Agent evaluation
-    python evaluation_harness.py --track C \
-        --agent-id <bedrock-agent-id> \
-        --agent-alias-id <alias-id>
+    # Track C — AgentCore Harness evaluation
+    python evaluation_harness.py --track C
 
 Requirements:
     pip install ragas datasets "langchain-community<0.4" langchain-aws boto3 pandas
@@ -656,6 +654,13 @@ class LocalAgentEvaluator(AgentEvaluator):
             "escalated": escalated,
             "escalation_expected": tc.should_escalate,
             "response": result["response"],
+            # The inherited run() and _print_summary() read these names. Without
+            # them LocalAgentEvaluator(...).run() raised KeyError: 'tool_calls_made'
+            # (fixed 2026-10-14).
+            "tool_calls_made": tool_calls,
+            "missing_required_tools": missing_required,
+            "unexpected_forbidden_tools": unexpected_forbidden,
+            "escalation_correct": escalation_correct,
         }
 
 
@@ -725,20 +730,14 @@ def main():
                 region=args.region,
             )
         else:
-            print("Mode: local ReAct agent over bedrock-runtime")
+            print("Mode: Amazon Bedrock AgentCore Harness")
+            from agent.harness_client import HarnessAgent
 
-            def placeholder_agent_fn(message: str, session_id: str):
-                raise NotImplementedError(
-                    "TODO: wire up your agent.\n\n"
-                    "Return (reply_text, [tool_names_called_in_order]).\n"
-                    "See LocalAgentEvaluator's docstring for the Converse-API\n"
-                    "extraction pattern -- it is about four lines.\n\n"
-                    "Managed Bedrock Agents is closed to new AWS accounts, so\n"
-                    "--agent-id is not an option for you. Build the ReAct loop\n"
-                    "yourself; Track C's rubric does not care which you used."
-                )
-
-            evaluator = LocalAgentEvaluator(invoke_fn=placeholder_agent_fn)
+            agent = HarnessAgent(
+                region=args.region,
+                run_label=f"eval-{timestamp}",
+            )
+            evaluator = LocalAgentEvaluator(invoke_fn=agent.invoke)
         results = evaluator.run(AGENT_TEST_CASES)
         output_path = os.path.join(args.output_dir, f"agent_eval_{timestamp}.csv")
         results.to_csv(output_path, index=False)

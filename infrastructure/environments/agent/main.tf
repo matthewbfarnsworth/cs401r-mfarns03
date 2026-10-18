@@ -142,15 +142,24 @@ resource "aws_iam_role_policy" "gateway" {
         Action   = "lambda:InvokeFunction"
         Resource = aws_lambda_function.tools.arn
       },
-      # TODO (student) 1: the gateway enforces Cedar policies by calling the
-      # policy engine. Add a statement that lets this role do that.
-      # Symptom if missing: terraform apply fails creating the gateway with
-      # "Access denied while calling GetPolicyEngine". CreateGateway checks
-      # this role up front and names ONE missing action per attempt, so expect
-      # to iterate. Read the AgentCore developer guide page "AgentCore Gateway
-      # and Policy in AgentCore IAM Permissions" (Gateway Execution Role) and
-      # add them all at once instead. Scope Resource to the policy engine ARN
-      # and local.gateway_glob.
+      {
+        Sid      = "PolicyEngineConfiguration"
+        Effect   = "Allow"
+        Action   = "bedrock-agentcore:GetPolicyEngine"
+        Resource = aws_bedrockagentcore_policy_engine.this.policy_engine_arn
+      },
+      {
+        Sid    = "PolicyEngineAuthorization"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:AuthorizeAction",
+          "bedrock-agentcore:PartiallyAuthorizeActions"
+        ]
+        Resource = [
+          aws_bedrockagentcore_policy_engine.this.policy_engine_arn,
+          local.gateway_glob
+        ]
+      }
     ]
   })
 }
@@ -232,15 +241,28 @@ resource "aws_bedrockagentcore_policy" "permit_tools" {
   depends_on = [aws_bedrockagentcore_gateway_target.tools]
 }
 
-# TODO (student) 3: the $50 credit cap. Write a Cedar forbid policy that blocks
-# northstar-tools___apply_loyalty_credit when context.input.amount exceeds
-# var.credit_cap_dollars, as a resource "aws_bedrockagentcore_policy" "cap_loyalty_credit".
-# Model it on permit_tools above. Two things the validator will teach you the hard way:
-#   - A forbid created before the permit exists is rejected as "Overly Restrictive:
-#     Policy Engine will deny every request". Make it depend on the permit.
-#   - amount is an integer in tool_definitions.json. Compare it as one.
-# Symptom if missing: python agent/policy_tests.py reports BAD for the $51 and
-# $75 credits, which the gateway allows.
+resource "aws_bedrockagentcore_policy" "cap_loyalty_credit" {
+  name             = "cap_loyalty_credit"
+  policy_engine_id = aws_bedrockagentcore_policy_engine.this.policy_engine_id
+  validation_mode  = "FAIL_ON_ANY_FINDINGS"
+
+  definition {
+    cedar {
+      statement = <<-CEDAR
+        forbid (
+          principal,
+          action == AgentCore::Action::"${local.target_name}___apply_loyalty_credit",
+          resource == AgentCore::Gateway::"${aws_bedrockagentcore_gateway.this.gateway_arn}"
+        )
+        when {
+          context.input.amount > ${var.credit_cap_dollars}
+        };
+      CEDAR
+    }
+  }
+
+  depends_on = [aws_bedrockagentcore_policy.permit_tools]
+}
 
 # ---------------------------------------------------------------------------
 # Harness and its execution role
@@ -289,10 +311,12 @@ resource "aws_iam_role_policy" "harness" {
           "arn:aws:bedrock-agentcore:${var.region}:${local.account_id}:workload-identity-directory/default/workload-identity/harness_${var.harness_name}-*",
         ]
       },
-      # TODO (student) 2: the harness calls your tools through the gateway.
-      # Add the one statement that allows it, scoped to this gateway's ARN.
-      # Symptom if missing: every invocation fails with "Failed to load tool
-      # 'northstar_tools' ... 403 Forbidden" on the gateway URL.
+      {
+        Sid      = "InvokeNorthStarGateway"
+        Effect   = "Allow"
+        Action   = "bedrock-agentcore:InvokeGateway"
+        Resource = aws_bedrockagentcore_gateway.this.gateway_arn
+      }
     ]
   })
 }

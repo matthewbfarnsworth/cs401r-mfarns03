@@ -160,6 +160,30 @@ mkdir -p docs/lab3-evidence
 
 The final run writes its metrics, confusion matrix, feature-importance plot, and loyalty-tier evaluation to `docs/lab3-evidence/`. The evaluation discussion is in `docs/lab3-evaluation-report.md`.
 
+### Track C: AgentCore customer service agent
+
+Track C has its own Terraform root because AgentCore requires the AWS provider 6.x. It reuses the existing remote-state bucket and lock table but keeps separate state under `agent/terraform.tfstate`.
+
+```bash
+cd infrastructure/environments/agent
+terraform init
+terraform apply
+cd ../../..
+```
+
+Run the gateway policy checks, then run the six-scenario agent evaluation at least twice:
+
+```bash
+source .venv/bin/activate
+python agent/policy_tests.py
+python evaluation_harness.py --track C
+python evaluation_harness.py --track C
+```
+
+The demo notebook is `notebooks/lab3-demo.ipynb`. It runs the policy checks and all six agent scenarios against the live AgentCore stack. Run it with **Kernel → Restart & Run All** and save its outputs.
+
+Track C writes evaluation CSVs to `evaluation_results/` and records tool traces and per-session costs in `docs/lab3-evidence/agent-traces.jsonl` and `docs/lab3-evidence/agent-cost.csv`. The fixed evidence file is `docs/lab3-evidence/agent_eval.csv`. Policy results are stored in `docs/lab3-evidence/policy-tests.json`, and observed limitations are documented in `docs/lab3-evidence/track-c-failures.md`.
+
 ### Evidence and teardown
 
 Export AWS-side evidence after the final training and Track C evaluation, but before teardown:
