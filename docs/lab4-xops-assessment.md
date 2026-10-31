@@ -60,7 +60,37 @@ Evidence: `docs/lab4-pipeline-runs.txt`, `docs/lab4-failure-demo.txt`, `docs/lab
 
 ## MLOps Configuration (Task 3)
 
-*To do: champion-challenger criterion, retraining triggers, experiment tracking (`docs/lab4-mlflow-runs.txt`), model lineage (`docs/lab4-model-package.json`).*
+### Champion-challenger criterion
+
+A challenger replaces the champion only if all of these are true:
+
+1. It passes every CI gate.
+2. Its AUC is at least the champion's AUC.
+3. Its Platinum-to-Bronze recall gap is no wider than the champion's gap.
+
+Both models are compared on the same recent customers. Ties go to the challenger because it trained on newer data. No regression is allowed, because small allowed drops could add up over time. Today's bar is AUC 0.7838 and a 29.8 point gap.
+
+This is stricter than the CI test, which allows AUC down to champion - 0.02. The CI test blocks bad models; this rule decides promotion at the human approval step.
+
+Limitation: AUC varies by chance. Across 50 train/test splits of my data, only 34% reached 0.7838, so comparing scores from different splits would let a lucky champion block equal models. The same-customers comparison addresses this, but it is not automated yet.
+
+### Retraining triggers
+
+**Scheduled:** every week. Amazon EventBridge Scheduler starts the Glue feature job, and an EventBridge rule on that job's success starts the pipeline with `StartPipelineExecution`. Training costs about $0.02 per run, so keeping the model current is worth more than the cost. Features must run first because a feature set older than 48 hours fails the build.
+
+**Performance:** when AUC falls below 0.76 on the latest customers whose 90-day outcome is known. SageMaker Model Monitor (model quality) publishes the metric, a CloudWatch alarm watches it, and an EventBridge rule on the alarm starts the same Glue-then-pipeline path. Model Monitor needs a deployed endpoint with data capture and ground truth labels, which I do not have until a model is served.
+
+I chose 0.76 from measured noise. Across 50 splits, AUC averaged 0.7795 and never fell below 0.7608, so a score under 0.76 is unlikely to be chance. A check needs about 3,000 customers to match that measurement. The threshold should be recalculated if the data changes much, since it reflects chance variation and not observed production decay.
+
+Limitations: outcomes take 90 days to become known, so this trigger catches decay late. `FEATURE_CUTOFF` and `SNAPSHOT` are also hard-coded in `glue-scripts/feature_engineer.py`, so scheduled retraining needs rolling dates before it can learn from new labels.
+
+### Experiment tracking
+
+`docs/lab4-mlflow-runs.txt` shows `mlflow.search_runs` output from my `northstar-mlflow` MLflow App: 10 tuning runs with different hyperparameters and the final Lab 3 run. These runs predate the recency constraint added in Lab 4.
+
+### Model lineage
+
+Packages 3, 4 and 5 store the commit SHA, training data URI, data timestamp and evaluation metrics location as customer metadata, shown in `docs/lab4-model-package.json`. I added these from my shell, so future packages will not get them automatically. Adding this to `buildspec.yml` is a known gap.
 
 ## DataOps Maturity (Task 4)
 
