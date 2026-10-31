@@ -92,10 +92,22 @@ Limitations: outcomes take 90 days to become known, so this trigger catches deca
 
 Packages 3, 4 and 5 store the commit SHA, training data URI, data timestamp and evaluation metrics location as customer metadata, shown in `docs/lab4-model-package.json`. I added these from my shell, so future packages will not get them automatically. Adding this to `buildspec.yml` is a known gap.
 
-## DataOps Maturity (Task 4)
+## DataOps Maturity
 
-*To do.*
+**Current level:** 1 (Repeatable)
 
-## MLOps Maturity (Task 4)
+**Evidence:** The pipelines exist and are repeatable, but a person starts them. `glue-scripts/transform.py` and `glue-scripts/feature_engineer.py` run as Glue jobs defined in `infrastructure/modules/glue/main.tf`, which declares no trigger or workflow, so each run starts with `aws glue start-job-run`. `docs/lab2-data-contract.md` documents schema, grain and quality guarantees, but enforcement is partial: `transform.py` asserts that no `customer_id` is null, while the broader checks in `tests/test_data.py` run later, in CI. `docs/lab4-build-green.log` line 352 shows those 28 tests passing in `pre_build`. They protect training, but only after the data has been written.
 
-*To do.*
+**Gap to Level 2:** Missing an orchestrator that runs the crawler and both Glue jobs on a schedule or event. Without one, the 48-hour freshness test in `tests/test_data.py` fails the build whenever nobody remembers to rerun the feature job. Also missing inline quality gates that stop bad data before it reaches `processed/` or `features/`, and data observability for volume and distribution changes.
+
+**Top priority investment:** Add an `aws_glue_workflow` with a scheduled `aws_glue_trigger` to `infrastructure/modules/glue/main.tf`, chaining the crawler, transform job and feature job, so that no run depends on someone remembering it.
+
+## MLOps Maturity
+
+**Current level:** 2 (Automated), with monitoring as the weakest part
+
+**Evidence:** A push to `main` starts the pipeline in `pipeline.yaml`, with no manual step before approval. `docs/lab4-pipeline-runs.txt` records six builds from those pushes. `buildspec.yml` runs the tests, training and promotion gates. In `docs/lab4-build-green.log`, line 549 shows package 5 being registered and line 741 shows the model and fairness gate passing with 28 tests. `docs/lab4-failure-demo.txt` shows a failing test halting in `PRE_BUILD`, registering no model, and delivering an alarm notification. Monitoring is limited to that build-failure alarm. No model is deployed yet, so nothing watches production performance, which falls short of Level 2's "systematic monitoring".
+
+**Gap to Level 3:** Missing automated drift detection and retraining (see Lab 6): the AUC < 0.76 trigger in this document is defined but not deployed, and `infrastructure/` and `pipeline.yaml` contain no monitoring schedule or EventBridge rule. Audit trails are also incomplete: lineage was added by hand to packages 3, 4 and 5 only. Policy enforcement is partial: a person applies the champion-challenger rule, and the fairness flag warns without blocking.
+
+**Top priority investment:** Once a model is served, add a SageMaker Model Monitor model-quality schedule, with a CloudWatch alarm on AUC < 0.76 and an EventBridge rule that starts the pipeline.
