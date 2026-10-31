@@ -1,2 +1,1 @@
 Run 1: commit f6c6416, build 037a6d28 succeeded, champion test skipped (no approved model), package 3 approved as a demonstration.
-Run 2: commit 321efc5, build 9e81828f succeeded, champion test passed against package 3 (AUC 0.7838 for both), package 4 left pending.
