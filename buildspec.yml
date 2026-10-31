@@ -160,7 +160,7 @@ phases:
         EXECUTION_ARN=$(aws sagemaker start-pipeline-execution \
           --pipeline-name ${PIPELINE_NAME} \
           --pipeline-execution-display-name "codebuild-${COMMIT_SHA}" \
-          --pipeline-parameters "Name=CommitSha,Value=${COMMIT_SHA}" \
+          --pipeline-parameters "Name=CommitSha,Value=${COMMIT_SHA}" "Name=TrainingInstanceType,Value=ml.g5.xlarge" \
           --query "PipelineExecutionArn" \
           --output text)
         echo "Pipeline execution started: $EXECUTION_ARN"
