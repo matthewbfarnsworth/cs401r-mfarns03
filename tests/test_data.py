@@ -36,6 +36,7 @@ set ALLOW_MISSING_DATA=1 explicitly. Never make absence silent by default.
 import glob
 import os
 from pathlib import Path
+import time
 
 import pandas as pd
 import pytest
@@ -53,6 +54,8 @@ ALLOW_MISSING = os.environ.get("ALLOW_MISSING_DATA") == "1"
 FEATURE_CUTOFF = pd.Timestamp("2026-04-01")
 WINDOW_START = pd.Timestamp("2025-04-01")
 SNAPSHOT = pd.Timestamp("2026-06-30")
+
+MAX_FEATURE_AGE_HOURS = 48
 
 RAW_COLUMNS = [
     "transaction_id", "customer_id", "purchase_date", "order_value",
@@ -286,20 +289,33 @@ class TestFeatures:
             "you anchored to FEATURE_CUTOFF and not to today()"
         )
 
-    # TODO: Add a test proving no feature used post-cutoff data.
-    # Careful: processed/ CONTAINS the holdout purchases (after FEATURE_CUTOFF),
-    # because the label is built from them, so "every customer's max
-    # purchase_date is <= FEATURE_CUTOFF" is false on correct data. Test the
-    # FEATURES instead: recompute the time-sensitive ones (recency, tenure, the
-    # 30/90/180-day frequencies) from processed rows with purchase_date <=
-    # FEATURE_CUTOFF -- your data/feature_engineering.py functions do this --
-    # and assert they equal what the pipeline wrote to features/.
+    def test_features_use_no_post_cutoff_data(self, processed_df, features_df):
+        """Recompute the time-sensitive features from purchases on or before the
+        cutoff. Any difference means the pipeline let holdout purchases in."""
+        from data.feature_engineering import (
+            compute_frequency_features,
+            compute_recency_features,
+        )
 
-    # TODO: Add a freshness test. The pipeline should refuse to train on a
-    # feature set older than 48 hours. event_time is Fractional epoch seconds:
-    # the wall-clock time your Lab 2 feature job ran, NOT the cutoff T.
-    # Consequence: re-run the northstar-dev-feature-engineer Glue job (~90 s)
-    # before any session in which you will push, or this test fails the build.
+        recomputed = compute_recency_features(processed_df, FEATURE_CUTOFF).merge(
+            compute_frequency_features(processed_df, FEATURE_CUTOFF), on="customer_id"
+        )
+        merged = features_df.merge(
+            recomputed, on="customer_id", how="left", suffixes=("", "_recomputed")
+        )
+        for col in ["days_since_last_purchase", "customer_tenure_days",
+                    "purchase_frequency_30d", "purchase_frequency_90d",
+                    "purchase_frequency_180d"]:
+            differs = (merged[col] != merged[f"{col}_recomputed"]).sum()
+            assert differs == 0, f"{col} differs from the recomputed value for {differs} customers"
+
+    def test_feature_set_is_fresh(self, features_df):
+        """event_time is when the Lab 2 feature job ran, in epoch seconds."""
+        age_hours = (time.time() - features_df["event_time"].min()) / 3600
+        assert age_hours < MAX_FEATURE_AGE_HOURS, (
+            f"Oldest feature is {age_hours:.1f} hours old (limit "
+            f"{MAX_FEATURE_AGE_HOURS}). Re-run northstar-dev-feature-engineer."
+        )
 
 
 # ── Cross-dataset consistency ─────────────────────────────────────────────────

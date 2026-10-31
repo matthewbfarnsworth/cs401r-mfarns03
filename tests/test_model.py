@@ -20,10 +20,13 @@ Run locally (after the local training run in the lab handout):
         --eval-metrics-path /tmp/out/evaluation_metrics.json
 """
 
+import io
 import json
 import os
+import warnings
 from pathlib import Path
 
+import boto3
 import numpy as np
 import pandas as pd
 import pytest
@@ -351,6 +354,77 @@ class TestModelRobustness:
 
 
 # ── Stored Metrics Quality Gate ────────────────────────────────────────────────
+TOLERANCE = 0.02
+MODEL_PACKAGE_GROUP = "northstar-churn-models"
+
+
+def regresses(new_auc, champ_auc, tolerance=TOLERANCE):
+    """True if the candidate is worse than the champion by more than tolerance."""
+    return round(champ_auc - new_auc, 10) > tolerance
+
+
+def champion_from_registry(sm=None, s3=None, group=MODEL_PACKAGE_GROUP):
+    """Return (package_arn, champion_auc), or None if nothing is Approved yet.
+
+    Exceptions are deliberately not caught: a registry or metrics file that
+    cannot be read must fail the test, not look like "no champion".
+    """
+    sm = sm or boto3.client("sagemaker")
+    s3 = s3 or boto3.client("s3")
+    packages = sm.list_model_packages(
+        ModelPackageGroupName=group,
+        ModelApprovalStatus="Approved",
+        SortBy="CreationTime",
+        SortOrder="Descending",
+        MaxResults=1,
+    )["ModelPackageSummaryList"]
+    if not packages:
+        return None
+    arn = packages[0]["ModelPackageArn"]
+    package = sm.describe_model_package(ModelPackageName=arn)
+    uri = package["ModelMetrics"]["ModelQuality"]["Statistics"]["S3Uri"]
+    bucket, _, key = uri[len("s3://"):].partition("/")
+    body = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+    return arn, float(json.loads(body)["auc_roc"])
+
+
+class TestChampionHelpers:
+    """Offline checks of the regression logic. No AWS calls."""
+
+    def test_within_tolerance_does_not_regress(self):
+        assert not regresses(0.73, 0.75)
+
+    def test_beyond_tolerance_regresses(self):
+        assert regresses(0.7299, 0.75)
+
+    def test_no_approved_package_means_no_champion(self):
+        class FakeSageMaker:
+            def list_model_packages(self, **kwargs):
+                self.kwargs = kwargs
+                return {"ModelPackageSummaryList": []}
+
+        sm = FakeSageMaker()
+        assert champion_from_registry(sm=sm, s3=object()) is None
+        assert sm.kwargs["ModelApprovalStatus"] == "Approved"
+        assert sm.kwargs["SortOrder"] == "Descending"
+
+    def test_champion_auc_is_read_from_s3_metrics(self):
+        class FakeSageMaker:
+            def list_model_packages(self, **kwargs):
+                return {"ModelPackageSummaryList": [{"ModelPackageArn": "arn/7"}]}
+
+            def describe_model_package(self, ModelPackageName):
+                uri = "s3://bucket/artifacts/evaluations/abc/evaluation_metrics.json"
+                return {"ModelMetrics": {"ModelQuality": {"Statistics": {"S3Uri": uri}}}}
+
+        class FakeS3:
+            def get_object(self, Bucket, Key):
+                self.requested = (Bucket, Key)
+                return {"Body": io.BytesIO(b'{"auc_roc": 0.78}')}
+
+        s3 = FakeS3()
+        assert champion_from_registry(sm=FakeSageMaker(), s3=s3) == ("arn/7", 0.78)
+        assert s3.requested == ("bucket", "artifacts/evaluations/abc/evaluation_metrics.json")
 
 class TestStoredMetricsGate:
     """
@@ -423,4 +497,19 @@ class TestStoredMetricsGate:
             f"Validation churn rate {rate:.1%} outside expected range [15%, 30%]. "
             f"The reference dataset measures 22.0%. Check that your validation "
             f"split is stratified."
+        )
+    
+    def test_candidate_not_worse_than_champion(self, eval_metrics):
+        """Regression gate against the newest Approved package. The candidate
+        itself is PendingManualApproval, so it can never be its own champion."""
+        champion = champion_from_registry()
+        if champion is None:
+            pytest.skip("No Approved package in the registry yet")
+        arn, champ_auc = champion
+        version = arn.rsplit("/", 1)[-1]
+        new_auc = float(eval_metrics["auc_roc"])
+        warnings.warn(f"champion v{version} auc={champ_auc:.4f}; candidate auc={new_auc:.4f}")
+        assert not regresses(new_auc, champ_auc), (
+            f"Candidate AUC {new_auc:.4f} is more than {TOLERANCE} below champion "
+            f"v{version} AUC {champ_auc:.4f}."
         )

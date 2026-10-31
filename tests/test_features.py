@@ -157,11 +157,8 @@ class TestRecencyFeatures:
         empty_txns = pd.DataFrame(columns=["customer_id", "purchase_date", "order_value"])
         customer_ids = pd.DataFrame({"customer_id": ["CUST-NODATA"]})
 
-        # TODO: Your function should handle customers with no transactions
-        # Expected behavior: return days_since_last_purchase = 999 (or configurable sentinel)
-        # features = compute_recency_features(empty_txns, SNAPSHOT_DATE, customer_ids)
-        # assert features.iloc[0]["days_since_last_purchase"] == 999
-        pass
+        features = compute_recency_features(empty_txns, SNAPSHOT_DATE, customer_ids)
+        assert features.iloc[0]["days_since_last_purchase"] == 999
 
 
 # ── Frequency Feature Tests ────────────────────────────────────────────────────
@@ -285,10 +282,6 @@ class TestFullFeatureSet:
         assert not missing, f"Missing features: {missing}"
 
     def test_no_null_features_for_known_customers(self, sample_customers, sample_transactions):
-        """
-        TODO: After filling missing values, no feature should be NaN for customers
-        who have at least one transaction. Document your null-filling strategy.
-        """
         features = build_churn_feature_set(
             customers=sample_customers,
             transactions=sample_transactions,
@@ -298,7 +291,7 @@ class TestFullFeatureSet:
         active_customer_ids = sample_transactions["customer_id"].unique()
         active_features = features[features["customer_id"].isin(active_customer_ids)]
         null_counts = active_features[self.REQUIRED_FEATURES].isna().sum()
-        # TODO: Assert null_counts.sum() == 0 (implement after deciding on null strategy)
+        assert null_counts.sum() == 0, f"Null features: {null_counts[null_counts > 0].to_dict()}"
 
     def test_output_has_customer_id_column(self, sample_customers, sample_transactions):
         features = build_churn_feature_set(
@@ -307,3 +300,91 @@ class TestFullFeatureSet:
             snapshot_date=SNAPSHOT_DATE,
         )
         assert "customer_id" in features.columns, "Output must include customer_id for joining"
+
+def _tx(customer_id, days_ago, value=40.0, items=3, channel="online", category="Home", n=1):
+    """One processed-grain transaction, days_ago days before SNAPSHOT_DATE."""
+    return {
+        "transaction_id": f"TXN-{n:08d}",
+        "customer_id": customer_id,
+        "purchase_date": (SNAPSHOT_DATE - timedelta(days=days_ago)).isoformat(),
+        "order_value": value,
+        "num_items": items,
+        "channel": channel,
+        "product_category": category,
+    }
+
+
+class TestSingleTransactionCustomer:
+    """Edge case: one purchase is both the customer's first and last."""
+
+    @pytest.fixture
+    def single(self):
+        roster = pd.DataFrame({"customer_id": ["CUST-SINGLE"]})
+        txns = pd.DataFrame([_tx("CUST-SINGLE", 20)])
+        return build_churn_feature_set(roster, txns, SNAPSHOT_DATE).iloc[0]
+
+    def test_recency_equals_tenure(self, single):
+        assert single["days_since_last_purchase"] == 20
+        assert single["customer_tenure_days"] == 20
+
+    def test_frequency_counts_the_one_order(self, single):
+        assert single["purchase_frequency_30d"] == 1
+        assert single["purchase_frequency_90d"] == 1
+        assert single["purchase_frequency_180d"] == 1
+
+    def test_monetary_values_equal_the_one_order(self, single):
+        assert single["avg_order_value"] == pytest.approx(40.0)
+        assert single["total_spend_90d"] == pytest.approx(40.0)
+        assert single["total_lifetime_value"] == pytest.approx(40.0)
+        assert single["avg_basket_size_6m"] == pytest.approx(3.0)
+
+    def test_behavioral_values(self, single):
+        assert single["category_diversity_score"] == pytest.approx(1 / 8)
+        assert single["online_to_store_ratio"] == pytest.approx(1.0)
+
+
+class TestZeroPurchaseCustomer:
+    """Boundary case: on the roster, with no transactions."""
+
+    @pytest.fixture
+    def zero(self, sample_transactions):
+        roster = pd.DataFrame({"customer_id": ["CUST-10000001", "CUST-NODATA"]})
+        features = build_churn_feature_set(roster, sample_transactions, SNAPSHOT_DATE)
+        return features[features["customer_id"] == "CUST-NODATA"].iloc[0]
+
+    def test_recency_gets_sentinel(self, zero):
+        assert zero["days_since_last_purchase"] == 999
+
+    def test_every_other_feature_is_zero(self, zero):
+        others = [f for f in TestFullFeatureSet.REQUIRED_FEATURES
+                  if f != "days_since_last_purchase"]
+        for feature in others + ["purchase_frequency_30d", "avg_order_value",
+                                 "total_lifetime_value"]:
+            assert zero[feature] == 0, f"{feature} should be 0, got {zero[feature]}"
+
+
+class TestWindowBoundaries:
+    """Boundary case: the windows must match the Glue job exactly."""
+
+    def test_window_excludes_purchase_exactly_n_days_before_cutoff(self):
+        txns = pd.DataFrame([_tx("CUST-EDGE", 30, n=1), _tx("CUST-EDGE", 29, n=2)])
+        features = compute_frequency_features(txns, SNAPSHOT_DATE)
+        assert features.iloc[0]["purchase_frequency_30d"] == 1
+
+    def test_purchase_on_cutoff_counts(self):
+        txns = pd.DataFrame([_tx("CUST-EDGE", 0)])
+        features = compute_recency_features(txns, SNAPSHOT_DATE)
+        assert features.iloc[0]["days_since_last_purchase"] == 0
+
+    def test_purchase_after_cutoff_is_ignored(self):
+        """Holdout purchases must never reach a feature."""
+        roster = pd.DataFrame({"customer_id": ["CUST-EDGE"]})
+        txns = pd.DataFrame([
+            _tx("CUST-EDGE", 10, value=40.0, channel="store", category="Home", n=1),
+            _tx("CUST-EDGE", -5, value=500.0, channel="online", category="Beauty", n=2),
+        ])
+        row = build_churn_feature_set(roster, txns, SNAPSHOT_DATE).iloc[0]
+        assert row["days_since_last_purchase"] == 10
+        assert row["total_lifetime_value"] == pytest.approx(40.0)
+        assert row["category_diversity_score"] == pytest.approx(1 / 8)
+        assert row["online_to_store_ratio"] == 0

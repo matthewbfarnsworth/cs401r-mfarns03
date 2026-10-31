@@ -10,3 +10,6 @@ __pycache__/
 .aws/
 .localstack/
 .terraform.lock.hcl
+data/processed/
+data/features/
+reports/
