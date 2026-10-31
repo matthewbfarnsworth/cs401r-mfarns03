@@ -60,9 +60,17 @@ resource "aws_iam_policy" "ml_engineer" {
           "sagemaker:CreateMlflowApp", "sagemaker:DescribeMlflowApp", "sagemaker:ListMlflowApps",
           "sagemaker:CreatePresignedMlflowAppUrl",
           "sagemaker:CreateModelPackage", "sagemaker:DescribeModelPackage", "sagemaker:ListModelPackages",
-          "sagemaker:CreateModelPackageGroup", "sagemaker:DescribeModelPackageGroup", "sagemaker:ListModelPackageGroups"
+          "sagemaker:CreateModelPackageGroup", "sagemaker:DescribeModelPackageGroup", "sagemaker:ListModelPackageGroups",
+          "sagemaker:AddTags", "sagemaker:ListTags"
         ],
         "Resource" : "*"
+      },
+            {
+        "Sid" : "PassSelfToSageMaker",
+        "Effect" : "Allow",
+        "Action" : ["iam:PassRole"],
+        "Resource" : aws_iam_role.ml_engineer.arn,
+        "Condition" : { "StringEquals" : { "iam:PassedToService" : "sagemaker.amazonaws.com" } }
       },
       {
         "Sid" : "StudioSelfService",
@@ -181,21 +189,7 @@ resource "aws_iam_policy" "data_engineer" {
         "Sid" : "ListDataPrefixes",
         "Effect" : "Allow",
         "Action" : ["s3:ListBucket"],
-        "Resource" : "arn:aws:s3:::${var.project}-${var.environment}-data-*",
-        "Condition" : {
-          "StringLike" : {
-            "s3:prefix" : [
-              "raw",
-              "raw/*",
-              "processed",
-              "processed/*",
-              "features",
-              "features/*",
-              "artifacts/glue",
-              "artifacts/glue/*"
-            ]
-          }
-        }
+        "Resource" : "arn:aws:s3:::${var.project}-${var.environment}-data-*"
       },
       {
         "Sid" : "DataZonesReadWrite",
@@ -210,7 +204,8 @@ resource "aws_iam_policy" "data_engineer" {
         "Resource" : [
           "arn:aws:s3:::${var.project}-${var.environment}-data-*/raw/*",
           "arn:aws:s3:::${var.project}-${var.environment}-data-*/processed/*",
-          "arn:aws:s3:::${var.project}-${var.environment}-data-*/features/*"
+          "arn:aws:s3:::${var.project}-${var.environment}-data-*/features/*",
+          "arn:aws:s3:::${var.project}-${var.environment}-data-*/features_$folder$"
         ]
       },
       {
