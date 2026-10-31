@@ -1,2 +1,32 @@
-Run 1: commit f6c6416, build 037a6d28 succeeded, champion test skipped (no approved model), package 3 approved as a demonstration.
-Run 2: commit 321efc5, build 9e81828f succeeded, champion test passed against package 3 (AUC 0.7838 for both), package 4 left pending.
+LAB 4 PIPELINE RUNS (all on Oct 31, 2026; every run that reached training used churn_model.train())
+Phases: Source, Test (pre_build), Build, Evaluate, Register. See docs/lab4-xops-assessment.md for the mapping.
+
+Build 1: commit a8cc8ed, build c04f07f8, ml.g5.xlarge spot. FAILED.
+  Test: data 28 passed, features 27 passed.
+  Stopped in BUILD: timed out at 45 minutes waiting for spot capacity; training job Stopped. No package.
+
+Build 2: commit 1de1f64, build 3bcc0e04, ml.g6.xlarge spot. FAILED.
+  Test: data 28 passed, features 27 passed. Training completed; package 2 registered.
+  Model and fairness: 1 failed, 26 passed, 1 skipped (test_model_monotone_on_recency).
+  Stopped in BUILD. post_build set package 2 to Rejected.
+
+Build 3: commit f6c6416, build 037a6d28, ml.g6.xlarge spot. GREEN.
+  Test: data 28 passed, features 27 passed.
+  Model and fairness: 27 passed, 1 skipped (champion test; no Approved package yet).
+  Registered package 3. Reached ManualApproval. Package 3 approved as a demonstration.
+
+Build 4: commit 321efc5, build 9e81828f, ml.g6.xlarge spot. GREEN.
+  Test: data 28 passed, features 27 passed.
+  Model and fairness: 28 passed. Champion test ran against package 3 (AUC 0.7838 for both).
+  Registered package 4. Reached ManualApproval.
+
+Build 5: commit 8a0d2e1, build 2b0be094. FAILED (deliberate).
+  Test: data 28 passed, features 1 failed and 27 passed (test_deliberate_ci_failure).
+  Stopped in PRE_BUILD. BUILD never ran. No package. Alarm fired. See docs/lab4-failure-demo.txt.
+
+Build 6: commit dd9ab14, build d04954f8, ml.g6.xlarge spot. GREEN (revert).
+  Test: data 28 passed, features 27 passed.
+  Model and fairness: 28 passed. Champion test ran against package 3 (AUC 0.7838 for both).
+  Metrics: AUC 0.7838, baseline 0.7208, precision@10% 0.7267, recall@10% 0.3303, lift CI [0.0440, 0.0827].
+  Registered package 5 as PendingManualApproval. Reached ManualApproval. Alarm back to OK.
+  Full log: docs/lab4-build-green.log

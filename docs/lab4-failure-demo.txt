@@ -1,3 +1,23 @@
+LAB 4 TASK 2: DELIBERATE FAILURE AND REVERT
+Failing run: commit 8a0d2e1 added an always-failing test to tests/test_features.py.
+Clean run:   commit dd9ab14 includes revert 908c8e2.
+All times are from the AWS output below. Alarm history uses MDT; build logs use UTC (MDT + 6).
+
+Failing run, what the output shows:
+  1. Halted in the phase that owns tests: PRE_BUILD FAILED, and BUILD never ran.
+  2. No registration: version 4 was the newest package, and it was created before this run.
+  3. Alarm: OK to ALARM at 14:12:32. The alarm was in OK before the run (since 13:41:32).
+  4. Delivery: "Successfully executed action" at 14:12:32.
+
+Clean run, what the output shows:
+  1. Green build: PRE_BUILD, BUILD and POST_BUILD all SUCCEEDED.
+  2. Registry gained version 5 as PendingManualApproval at 14:30:33.
+  3. Alarm returned to OK at 14:27:32. It clears when a 5-minute period has no failed
+     builds, so this happened while the clean build was still running.
+
+Note: the alarm history also lists two earlier real failures, a spot capacity timeout at
+13:10 and a model test failure at 13:26. Neither is part of this demonstration.
+
 === BUILD PHASES ===
 {
     "id": "northstar-ci:2b0be094-f873-46a7-8d5f-cb9bd1b853dc",
@@ -69,3 +89,86 @@
 |  2026-10-31T13:10:32.560000-06:00|  Action      |  Successfully executed action arn:aws:sns:us-east-1:182243447601:northstar-model-approvals   |
 |  2026-10-31T13:10:32.510000-06:00|  StateUpdate |  Alarm updated from OK to ALARM                                                              |
 +----------------------------------+--------------+----------------------------------------------------------------------------------------------+
+
+=== REVERT: CLEAN RUN (commit dd9ab14, which includes revert 908c8e2) ===
+{
+    "id": "northstar-ci:d04954f8-bb33-4786-8776-5ebac85ef716",
+    "commit": "dd9ab146bda47b3c4100885a0a0c3f81254a06d9",
+    "status": "SUCCEEDED",
+    "phases": [
+        [
+            "SUBMITTED",
+            "SUCCEEDED"
+        ],
+        [
+            "QUEUED",
+            "SUCCEEDED"
+        ],
+        [
+            "PROVISIONING",
+            "SUCCEEDED"
+        ],
+        [
+            "DOWNLOAD_SOURCE",
+            "SUCCEEDED"
+        ],
+        [
+            "INSTALL",
+            "SUCCEEDED"
+        ],
+        [
+            "PRE_BUILD",
+            "SUCCEEDED"
+        ],
+        [
+            "BUILD",
+            "SUCCEEDED"
+        ],
+        [
+            "POST_BUILD",
+            "SUCCEEDED"
+        ],
+        [
+            "UPLOAD_ARTIFACTS",
+            "SUCCEEDED"
+        ],
+        [
+            "FINALIZING",
+            "SUCCEEDED"
+        ],
+        [
+            "COMPLETED",
+            null
+        ]
+    ]
+}
+=== REVERT: TEST RESULTS ===
+2026-10-31T20:17:48 ============================== 28 passed in 0.82s ==============================
+2026-10-31T20:17:48 ============================== 27 passed in 0.53s ==============================
+2026-10-31T20:17:48 [Container] 2026/10/31 20:17:48.491596 Phase complete: PRE_BUILD State: SUCCEEDED
+2026-10-31T20:18:00     echo "Registered: $(cat /tmp/model_package_arn.txt)"
+2026-10-31T20:30:48 Registered: arn:aws:sagemaker:us-east-1:182243447601:model-package/northstar-churn-models/5
+2026-10-31T20:30:54 ======================== 28 passed, 4 warnings in 1.38s ========================
+2026-10-31T20:30:54 [Container] 2026/10/31 20:30:52.650646 Phase complete: BUILD State: SUCCEEDED
+=== REVERT: REGISTRY (version 5 is the clean run's new PendingManualApproval package) ===
+--------------------------------------------------------------------
+|                         ListModelPackages                        |
++---+-------------------------+------------------------------------+
+|  5|  PendingManualApproval  |  2026-10-31T14:30:33.090000-06:00  |
+|  4|  PendingManualApproval  |  2026-10-31T13:56:10.982000-06:00  |
+|  3|  Approved               |  2026-10-31T13:46:57.928000-06:00  |
+|  2|  Rejected               |  2026-10-31T13:24:49.882000-06:00  |
+|  1|  PendingManualApproval  |  2026-10-17T11:50:04.544000-06:00  |
++---+-------------------------+------------------------------------+
+=== REVERT: ALARM STATE ===
+OK	2026-10-31T14:27:32.520000-06:00
+=== ALARM ACTIONS: describe-alarm-history --history-item-type Action ===
+-----------------------------------------------------------------------------------------------------------------------------------
+|                                                      DescribeAlarmHistory                                                       |
++-----------------------------------+---------------------------------------------------------------------------------------------+
+|  2026-10-31T14:27:32.568000-06:00 |  Successfully executed action arn:aws:sns:us-east-1:182243447601:northstar-model-approvals  |
+|  2026-10-31T14:12:32.554000-06:00 |  Successfully executed action arn:aws:sns:us-east-1:182243447601:northstar-model-approvals  |
+|  2026-10-31T13:41:32.564000-06:00 |  Successfully executed action arn:aws:sns:us-east-1:182243447601:northstar-model-approvals  |
+|  2026-10-31T13:26:32.556000-06:00 |  Successfully executed action arn:aws:sns:us-east-1:182243447601:northstar-model-approvals  |
+|  2026-10-31T13:25:32.556000-06:00 |  Successfully executed action arn:aws:sns:us-east-1:182243447601:northstar-model-approvals  |
++-----------------------------------+---------------------------------------------------------------------------------------------+
