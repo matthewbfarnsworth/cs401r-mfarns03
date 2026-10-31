@@ -77,6 +77,7 @@ HYPERPARAMS = {
     "subsample": 0.6,
     "colsample_bytree": 1.0,
     "eta": 0.1,
+    "monotone_constraints": "(1,0,0,0,0,0,0,0,0,0,0)",
 }
 NUM_ROUNDS = 35
 
