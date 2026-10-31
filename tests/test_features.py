@@ -388,3 +388,7 @@ class TestWindowBoundaries:
         assert row["total_lifetime_value"] == pytest.approx(40.0)
         assert row["category_diversity_score"] == pytest.approx(1 / 8)
         assert row["online_to_store_ratio"] == 0
+
+
+def test_deliberate_ci_failure():
+    assert 1 == 2, "Deliberate failure for the Lab 4 demo"
