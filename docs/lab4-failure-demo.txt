@@ -1,0 +1,71 @@
+=== BUILD PHASES ===
+{
+    "id": "northstar-ci:2b0be094-f873-46a7-8d5f-cb9bd1b853dc",
+    "commit": "8a0d2e17ac86b14eaf406eb5404ac3b87f2bab17",
+    "status": "FAILED",
+    "phases": [
+        [
+            "SUBMITTED",
+            "SUCCEEDED"
+        ],
+        [
+            "QUEUED",
+            "SUCCEEDED"
+        ],
+        [
+            "PROVISIONING",
+            "SUCCEEDED"
+        ],
+        [
+            "DOWNLOAD_SOURCE",
+            "SUCCEEDED"
+        ],
+        [
+            "INSTALL",
+            "SUCCEEDED"
+        ],
+        [
+            "PRE_BUILD",
+            "FAILED"
+        ],
+        [
+            "FINALIZING",
+            "SUCCEEDED"
+        ],
+        [
+            "COMPLETED",
+            null
+        ]
+    ]
+}
+=== FAILED TEST ===
+2026-10-31T20:11:59 tests/test_features.py::test_deliberate_ci_failure FAILED                [100%]
+2026-10-31T20:11:59 __________________________ test_deliberate_ci_failure __________________________
+2026-10-31T20:11:59 tests/test_features.py:394: in test_deliberate_ci_failure
+2026-10-31T20:11:59 FAILED tests/test_features.py::test_deliberate_ci_failure - AssertionError: D...
+2026-10-31T20:11:59 ========================= 1 failed, 27 passed in 0.62s =========================
+2026-10-31T20:11:59 [Container] 2026/10/31 20:11:59.133298 Phase complete: PRE_BUILD State: FAILED
+=== MODEL PACKAGES ===
+--------------------------------------------------------------------
+|                         ListModelPackages                        |
++---+-------------------------+------------------------------------+
+|  4|  PendingManualApproval  |  2026-10-31T13:56:10.982000-06:00  |
+|  3|  Approved               |  2026-10-31T13:46:57.928000-06:00  |
+|  2|  Rejected               |  2026-10-31T13:24:49.882000-06:00  |
+|  1|  PendingManualApproval  |  2026-10-17T11:50:04.544000-06:00  |
++---+-------------------------+------------------------------------+
+=== ALARM HISTORY ===
+--------------------------------------------------------------------------------------------------------------------------------------------------
+|                                                              DescribeAlarmHistory                                                              |
++----------------------------------+--------------+----------------------------------------------------------------------------------------------+
+|  2026-10-31T14:12:32.554000-06:00|  Action      |  Successfully executed action arn:aws:sns:us-east-1:182243447601:northstar-model-approvals   |
+|  2026-10-31T14:12:32.511000-06:00|  StateUpdate |  Alarm updated from OK to ALARM                                                              |
+|  2026-10-31T13:41:32.564000-06:00|  Action      |  Successfully executed action arn:aws:sns:us-east-1:182243447601:northstar-model-approvals   |
+|  2026-10-31T13:41:32.516000-06:00|  StateUpdate |  Alarm updated from ALARM to OK                                                              |
+|  2026-10-31T13:26:32.556000-06:00|  Action      |  Successfully executed action arn:aws:sns:us-east-1:182243447601:northstar-model-approvals   |
+|  2026-10-31T13:26:32.513000-06:00|  StateUpdate |  Alarm updated from OK to ALARM                                                              |
+|  2026-10-31T13:25:32.556000-06:00|  Action      |  Successfully executed action arn:aws:sns:us-east-1:182243447601:northstar-model-approvals   |
+|  2026-10-31T13:25:32.511000-06:00|  StateUpdate |  Alarm updated from ALARM to OK                                                              |
+|  2026-10-31T13:10:32.560000-06:00|  Action      |  Successfully executed action arn:aws:sns:us-east-1:182243447601:northstar-model-approvals   |
+|  2026-10-31T13:10:32.510000-06:00|  StateUpdate |  Alarm updated from OK to ALARM                                                              |
++----------------------------------+--------------+----------------------------------------------------------------------------------------------+
