@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Lab 5: Deployment &amp; Scaling + Security</title>
+<style>
+ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+      line-height:1.55;max-width:52rem;margin:2rem auto;padding:0 1.25rem;color:#1a1a1a}
+ code{background:#f4f4f4;padding:.12em .35em;border-radius:3px;font-size:.92em}
+ pre{background:#f4f4f4;padding:1rem;border-radius:5px;overflow-x:auto}
+ pre code{background:none;padding:0}
+ table{border-collapse:collapse;width:100%;margin:1rem 0}
+ th,td{border:1px solid #ccc;padding:.5rem .6rem;text-align:left;vertical-align:top}
+ th{background:#f0f0f0}
+ blockquote{border-left:4px solid #c8102e;margin:1rem 0;padding:.4rem 1rem;background:#fafafa}
+ h1,h2,h3{line-height:1.25} hr{border:none;border-top:1px solid #ddd;margin:2rem 0}
+</style></head><body>
+<h1 id="lab-5-deployment-scaling-security">Lab 5: Deployment &amp; Scaling + Security</h1>
+<p><strong>Assigned:</strong> Thu Oct 29 | <strong>Due:</strong> Sat Nov 14, midnight
+<strong>Chapters:</strong> <em>Deployment &amp; Scaling</em>, <em>Security, Privacy &amp; Compliance</em>
+<strong>Builds on:</strong> Labs 1–4 — deploys your Lab 3 churn model to production</p>
+<h2 id="objective">Objective</h2>
+<p>Ship the NorthStar churn model to production using a controlled deployment strategy, and document the security and privacy posture required to deploy customer data models in an enterprise environment. After this lab, the churn model is live. The offer generation or agent system remains in staging — it will be promoted in Lab 6 after monitoring is in place.</p>
+<h2 id="starter-kit-canvas-lab-5">Starter Kit (Canvas: Lab 5)</h2>
+<ul>
+<li><code>scripts/teardown-lab5.sh</code> — deletes everything this lab can leave billing, verifies against the live API, and writes <code>docs/lab5-teardown-output.txt</code>, the evidence file the teardown gate checks. It is the only file in the kit.</li>
+</ul>
+<p>Everything else you need already exists in your repo from Labs 1–4: the trained model, the Model Registry group, the three IAM roles, and the CI/CD build. This lab is about what you do with them.</p>
+<blockquote>
+<p><strong>Added Thu Nov 5, 2026.</strong> The handout always told you to run <code>scripts/teardown-lab5.sh</code>, but no starter kit shipped it, so Lab 5 had no kit until this date. If you started earlier, copy the script into your repo now. Two other changes landed the same day: a corrected security step for <code>buildspec.yml</code> (under <em>Submitting Lab 5</em>) and a fifth prerequisite, an IAM statement for data capture.</p>
+<p><strong>Updated Sat Nov 7, 2026.</strong> A sixth prerequisite makes the 7-day data-capture lifecycle rule permanently delete on your versioned bucket. The <em>Teardown</em> section gained two Lab 2 notes: wait about 15 minutes after a Glue job before running <code>scripts/teardown-lab2.sh</code>, and replace that script with the current Lab 2 kit version first. Each rubric table also gained an <strong>Evidence</strong> column naming the file the TA grades. No criteria or points changed. All of this was announced on Canvas on Nov 10.</p>
+</blockquote>
+<hr />
+<h2 id="getting-your-repository">Getting Your Repository</h2>
+<p>Keep working in the repository you created for Lab 1, <code>cs401r-&lt;your-netid&gt;</code>.
+This lab extends the platform you already built; <strong>do not start a new repository.</strong></p>
+<p>Lab 5 ships <strong>one</strong> new file. Download the Lab 5 starter kit from Canvas (or copy it from
+<a href="https://github.com/byu-cs401r4-f26/cs401r-lab5-template" target="_blank" rel="noopener">https://github.com/byu-cs401r4-f26/cs401r-lab5-template</a>) into your existing repository,
+so that it sits at <code>scripts/teardown-lab5.sh</code>. Add it to what you have — do not replace
+anything.</p>
+<hr />
+<h2 id="submitting-lab-5">Submitting Lab 5</h2>
+<p>Read this section before you deploy anything. Most of the Task 1 evidence can only be
+captured <strong>while the endpoint is live</strong>, and the lab requires you to delete the endpoint
+before you submit. Once the endpoint is gone, that evidence cannot be recreated without
+deploying again and paying for it again.</p>
+<h3 id="what-you-submit-in-canvas">What you submit in Canvas</h3>
+<ol>
+<li>Commit everything in the table below to <code>main</code>.</li>
+<li>Tag that commit and push the tag:</li>
+</ol>
+<p><code>bash
+   git tag lab5-submit
+   git push origin main lab5-submit</code></p>
+<ol start="3">
+<li>Submit <strong>your repository URL</strong> in Canvas. Do not submit the tag name. It is always
+   <code>lab5-submit</code> for this lab, and the TA looks for it.</li>
+</ol>
+<p>The TA grades <code>git checkout lab5-submit</code>, so anything you push afterwards while
+starting the next lab does not change this lab's grade. <strong>If you forget the tag, you
+are graded at your last commit before the Canvas deadline</strong> — which, if you have already
+started the next lab, may not be the work you meant to submit. Tag it.</p>
+<p><strong>The TA grades your repository, never your AWS account.</strong> By the deadline your endpoint
+must be deleted, so nothing in AWS is left to inspect. If the evidence is not committed,
+the TA treats the task as not done. <strong>CLI output is the evidence.</strong> Screenshots are
+optional. The console lags the live API by hours, so a screenshot proves nothing the CLI
+output does not.</p>
+<h3 id="the-complete-list">The complete list</h3>
+<p>File names under <code>docs/</code> are exact. File names under <code>deployment/configs/</code> are the ones
+used by the commands below. The rubric requires the directory, and keeping these names
+means the commands work as written.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Task</th>
+<th>What it must show</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docs/lab5-deployment-output.txt</code></td>
+<td>1</td>
+<td>Sections 0–6 from the capture block below: model approval, both variants and their weights, auto-scaling (or the documented rejection), the rollback alarm and its state, the observed traffic split, the split after rollback, and the post-teardown check</td>
+</tr>
+<tr>
+<td><code>deployment/configs/endpoint-config-canary.json</code></td>
+<td>1, 5</td>
+<td>Two production variants (<code>champion</code>, <code>canary</code>) at 9:1, with <code>DataCaptureConfig</code> enabled for Lab 6</td>
+</tr>
+<tr>
+<td><code>deployment/configs/rollback-alarm.json</code></td>
+<td>1, 2, 5</td>
+<td>The rollback trigger as code: metric, statistic, numeric threshold, <strong>correct units</strong> (<code>ModelLatency</code> 200 ms is <code>200000</code>)</td>
+</tr>
+<tr>
+<td><code>deployment/configs/scalable-target.json</code> and <code>scaling-policy.json</code></td>
+<td>1, 5</td>
+<td>Target tracking on <code>SageMakerVariantInvocationsPerInstance</code> at 1000, cooldowns 60 s out / 600 s in. <strong>Required even if your quota never arrived.</strong> On that path these files are the scaling design you would have applied</td>
+</tr>
+<tr>
+<td><code>deployment/configs/rollback-action.sh</code></td>
+<td>1</td>
+<td>The <code>update-endpoint-weights-and-capacities</code> call that sets the canary to weight 0</td>
+</tr>
+<tr>
+<td><code>deployment/configs/sample.csv</code></td>
+<td>1</td>
+<td>The payload you used to invoke the endpoint: one header-less row of features in training order</td>
+</tr>
+<tr>
+<td><code>docs/lab5-deployment-plan.md</code></td>
+<td>1, 2</td>
+<td>The seven required sections, 600–900 words. Includes who approved the model, the 48 h → 60 min compression, and a rollback threshold that matches <code>rollback-alarm.json</code></td>
+</tr>
+<tr>
+<td><code>docs/lab5-security-assessment.md</code></td>
+<td>3, 4</td>
+<td>The STRIDE table, the seven-asset classification table, and the privacy impact assessment with its four sections</td>
+</tr>
+<tr>
+<td><code>buildspec.yml</code></td>
+<td>5</td>
+<td>At least one security validation step (see the note below the table)</td>
+</tr>
+<tr>
+<td><code>.gitignore</code></td>
+<td>5</td>
+<td>Still excludes <code>.env</code>, <code>terraform.tfvars</code> and <code>*.tfstate</code></td>
+</tr>
+<tr>
+<td><code>docs/lab5-teardown-output.txt</code></td>
+<td>gate</td>
+<td>Written by <code>scripts/teardown-lab5.sh</code> (the Lab 5 starter kit); every line reads <code>OK</code>. <strong>Task 1 is capped at half credit without it</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Batch Transform path:</strong> <code>docs/lab5-deployment-output.txt</code> holds the <code>APPROVED</code> quota
+request, <code>aws sagemaker describe-transform-job</code> for both the incumbent and the candidate
+job, and section 0 below. Add <code>docs/lab5-batch-comparison.md</code> with the two score
+distributions and the disagreement rate. Your rollback trigger, for example a maximum
+disagreement rate, still goes in <code>deployment/configs/</code>. Skip the endpoint config,
+scaling and traffic-split files.</p>
+<p><strong>The security step in <code>buildspec.yml</code>.</strong> The <code>bandit</code> block left commented out in the
+Lab 4 buildspec <strong>does not parse if you uncomment it as is.</strong> The multi-line <code>python -c</code>
+contains <code>if highs:</code>, which YAML reads as a mapping key (trap 9 below), so CodeBuild
+rejects the whole file. Replace that block with these three lines in <code>pre_build</code>.
+<code>-lll</code> reports only HIGH severity findings, and bandit exits 1 if it finds any, so the
+step can fail the build:</p>
+<pre><code class="language-yaml">      - echo &quot;Running security scan&quot;
+      - pip install --quiet bandit
+      - bandit -r models data -lll
+</code></pre>
+<h3 id="how-to-capture-the-evidence-three-windows">How to capture the evidence: three windows</h3>
+<p>You capture evidence at three points: while the canary is live, after the rollback, and
+after teardown. Run every block from the repo root.</p>
+<p><strong>Before window 1, create <code>deployment/configs/sample.csv</code>.</strong> The endpoint expects one
+header-less CSV row with your model's features in training order. That order is
+<code>FEATURE_COLUMNS</code> in your Lab 4 <code>models/churn/churn_model.py</code>:</p>
+<pre><code class="language-bash">B=northstar-dev-data-$(aws sts get-caller-identity --query Account --output text)
+mkdir -p /tmp/channel &amp;&amp; aws s3 cp s3://$B/features/customers/ /tmp/channel/ --recursive
+python3 -c '
+import sys, glob, pandas as pd; sys.path.insert(0, &quot;models/churn&quot;); import churn_model
+df = pd.concat(pd.read_parquet(p) for p in glob.glob(&quot;/tmp/channel/**/*.parquet&quot;, recursive=True))
+df[churn_model.FEATURE_COLUMNS].head(1).astype(float).to_csv(&quot;deployment/configs/sample.csv&quot;, header=False, index=False)'
+cat deployment/configs/sample.csv
+</code></pre>
+<p><strong>Helpers.</strong> Paste these into each new terminal before you run a capture block. <code>traffic N</code>
+invokes the endpoint N times and counts which variant answered each call:</p>
+<pre><code class="language-bash">OUT=docs/lab5-deployment-output.txt
+EP=northstar-churn-prod
+cap () { echo; echo &quot;===== $1  ($(date -u +%Y-%m-%dT%H:%M:%SZ)) =====&quot;; }
+traffic () {
+  python3 - &quot;$1&quot; &lt;&lt;'PY'
+import boto3, collections, sys
+rt = boto3.client(&quot;sagemaker-runtime&quot;, region_name=&quot;us-east-1&quot;)
+body = open(&quot;deployment/configs/sample.csv&quot;, &quot;rb&quot;).read()
+c = collections.Counter(
+    rt.invoke_endpoint(EndpointName=&quot;northstar-churn-prod&quot;, ContentType=&quot;text/csv&quot;,
+                       Body=body)[&quot;InvokedProductionVariant&quot;]
+    for _ in range(int(sys.argv[1])))
+print(&quot; / &quot;.join(f&quot;{k} {v}&quot; for k, v in sorted(c.items())), f&quot;  (n={sum(c.values())})&quot;)
+PY
+}
+</code></pre>
+<p><strong>Window 1: canary live at 9:1, rollback alarm created, before you shift any weights.</strong>
+This block creates the file. Windows 2 and 3 append to it.</p>
+<pre><code class="language-bash">{
+  echo &quot;Lab 5 deployment evidence - account $(aws sts get-caller-identity --query Account --output text)&quot;
+  cap &quot;0. Model Registry: versions and approval status&quot;
+  aws sagemaker list-model-packages --model-package-group-name northstar-churn-models \
+    --query 'ModelPackageSummaryList[].[ModelPackageVersion,ModelApprovalStatus,CreationTime]' --output table
+  cap &quot;1. describe-endpoint: both variants and their weights&quot;
+  aws sagemaker describe-endpoint --endpoint-name $EP \
+    --query '{Status:EndpointStatus,Config:EndpointConfigName,Variants:ProductionVariants[].{Name:VariantName,Weight:CurrentWeight,Instances:CurrentInstanceCount}}'
+  aws sagemaker describe-endpoint-config \
+    --endpoint-config-name &quot;$(aws sagemaker describe-endpoint --endpoint-name $EP --query EndpointConfigName --output text)&quot; \
+    --query 'ProductionVariants[].[VariantName,ModelName,InstanceType,InitialVariantWeight]' --output table
+  cap &quot;2. auto-scaling: register attempt, live targets and policies, quota requests&quot;
+  aws application-autoscaling register-scalable-target --cli-input-json file://deployment/configs/scalable-target.json
+  aws application-autoscaling describe-scalable-targets --service-namespace sagemaker
+  aws application-autoscaling describe-scaling-policies --service-namespace sagemaker
+  aws service-quotas list-requested-service-quota-change-history --service-code sagemaker --region us-east-1 \
+    --query 'RequestedQuotas[].[QuotaName,DesiredValue,Status,Created]' --output table
+  cap &quot;3. rollback alarm: definition as code, then live state&quot;
+  cat deployment/configs/rollback-alarm.json
+  aws cloudwatch describe-alarms --alarm-name-prefix northstar-churn-rollback \
+    --query 'MetricAlarms[].[AlarmName,MetricName,ExtendedStatistic,Threshold,EvaluationPeriods,StateValue]' --output table
+  cap &quot;4. observed traffic split at 9:1&quot;
+  traffic 200
+} 2&gt;&amp;1 | tee &quot;$OUT&quot;
+</code></pre>
+<p>Section 2 works on both auto-scaling paths. On <code>ml.m5.large</code>, you have already run
+<code>register-scalable-target</code> and then <code>put-scaling-policy</code>. Running the register call again
+just updates the existing target, and the policy appears in the output. On
+<code>ml.t2.medium</code>, the register call fails with the burstable-instance <code>ValidationException</code>,
+and <strong>that error, captured in the file, is your evidence</strong>, along with your pending quota
+request. Name your alarm with the <code>northstar-churn-rollback</code> prefix. Section 3 and the
+teardown script both look for that prefix.</p>
+<p><strong>Window 2: after the rollback.</strong> Do the rollback even if the canary was healthy.
+Section 5 is required evidence that the rollback control works. Run
+<code>bash deployment/configs/rollback-action.sh</code>, wait for <code>InService</code> (about 90 seconds),
+then:</p>
+<pre><code class="language-bash">{
+  cap &quot;5. after rollback: weights, then observed split&quot;
+  aws sagemaker describe-endpoint --endpoint-name $EP \
+    --query 'ProductionVariants[].[VariantName,CurrentWeight]' --output text
+  traffic 100
+} 2&gt;&amp;1 | tee -a &quot;$OUT&quot;
+</code></pre>
+<p>The canary must show 0 calls, so it does not appear in the count at all. If you also
+promote the canary, label that capture <code>5b</code> and append it the same way.</p>
+<p><strong>Window 3: after teardown.</strong> Run <code>bash scripts/teardown-lab5.sh</code>. It writes
+<code>docs/lab5-teardown-output.txt</code>. Then:</p>
+<pre><code class="language-bash">{
+  cap &quot;6. after teardown: live API&quot;
+  echo &quot;endpoints:        $(aws sagemaker list-endpoints --query 'length(Endpoints)' --output text)&quot;
+  echo &quot;endpoint configs: $(aws sagemaker list-endpoint-configs --query 'length(EndpointConfigs)' --output text)&quot;
+  echo &quot;scalable targets: $(aws application-autoscaling describe-scalable-targets --service-namespace sagemaker --query 'length(ScalableTargets)' --output text)&quot;
+} 2&gt;&amp;1 | tee -a &quot;$OUT&quot;
+</code></pre>
+<p>All three must read <code>0</code>.</p>
+<h3 id="before-you-tag">Before you tag</h3>
+<p>Open <code>docs/lab5-deployment-output.txt</code> and read it. An <code>AccessDenied</code> or
+<code>Could not connect</code> line where a table should be means that section captured nothing.
+Re-run it while the endpoint is still up, not after. Then:</p>
+<pre><code class="language-bash">grep -c '^===== ' docs/lab5-deployment-output.txt        # 7 (sections 0-6), or more if you added 5b
+grep '&quot;Threshold&quot;' deployment/configs/rollback-alarm.json # ModelLatency: 200000, not 200
+wc -w docs/lab5-deployment-plan.md                        # 600-900
+grep -c ' OK$' docs/lab5-teardown-output.txt              # 6
+bash scripts/check-secrets.sh                             # CLEAN
+git add docs/ deployment/ buildspec.yml .gitignore
+git commit -m &quot;Lab 5: deployment, security assessment, evidence&quot;
+git tag lab5-submit &amp;&amp; git push origin main lab5-submit
+</code></pre>
+<p>If your Lab 4 CI stack is still deployed, this push starts a pipeline run and a spot
+training job, about $0.02. That is harmless, but delete the stack if you have finished
+with it.</p>
+<blockquote>
+<p><strong>Public repositories, deliberately.</strong> You may read how other students approached
+the problem. Copying their work is plagiarism and is handled under the BYU Honor
+Code — commit your own. And because these are public: never commit credentials.
+No <code>.env</code>, no <code>terraform.tfvars</code>, no AWS keys. Committed secrets are an automatic
+zero. The provided <code>.gitignore</code> already excludes them; do not remove those lines.</p>
+</blockquote>
+<hr />
+<h2 id="read-this-first-cost">Read This First — Cost</h2>
+<p><strong>This is the first lab that creates a resource billed by the hour with nothing to stop it.</strong></p>
+<p>A SageMaker real-time endpoint bills from the moment it reaches <code>InService</code> until you delete it. It does not idle down, it does not expire, and nothing in SageMaker will remind you. An <code>ml.t2.medium</code> endpoint — where this lab starts — is <strong>$0.056/hour</strong>; <code>ml.m5.large</code> is <strong>$0.115/hour, about $83/month</strong>. Two variants during a canary is double that. Left running from submission day to the end of term, one forgotten endpoint costs more than the rest of this course combined.</p>
+<p><strong>Rolling back does not stop the bill.</strong> Shifting canary traffic to weight 0 stops it from <em>serving</em>; the instance stays provisioned and keeps charging. Only deleting the endpoint stops the charge. Verified.</p>
+<p>Consequences:</p>
+<ul>
+<li>The spec below requires a <strong>compressed monitoring window</strong> — you plan for 48 hours, you <em>observe</em> for 60 minutes. Read Task 1 carefully; do not run a literal 48-hour canary.</li>
+<li>Teardown is a <strong>gate</strong>, not a rubric line. See the Teardown section.</li>
+<li>An endpoint still running after the deadline is a <strong>10-point deduction</strong>, applied on top of the teardown gate.</li>
+</ul>
+<h2 id="prerequisites-do-this-before-task-1">Prerequisites — do this before Task 1</h2>
+<p>Lab 4 registered your model as <code>PendingManualApproval</code>. Nothing in Labs 1–4 ever approves it, and you cannot deploy an unapproved package as a governed release.</p>
+<ol>
+<li><strong>Confirm a model package exists.</strong></li>
+</ol>
+<p><code>bash
+   aws sagemaker list-model-packages \
+     --model-package-group-name northstar-churn-models \
+     --query 'ModelPackageSummaryList[*].[ModelPackageVersion,ModelApprovalStatus]' --output table</code></p>
+<p>If the group is empty, re-run your Lab 3 training script to produce a version before continuing.</p>
+<ol start="2">
+<li><strong>Approve the version you intend to deploy</strong>, and say so in your deployment plan — who approved, against which metrics.</li>
+</ol>
+<p><code>bash
+   aws sagemaker update-model-package \
+     --model-package-arn &lt;arn&gt; --model-approval-status Approved</code></p>
+<p>The approval decision is part of Task 2's pre-deployment checklist. "It was already approved" is not an answer; a human reviewed metrics and signed off, and your plan names the role that does it.</p>
+<ol start="3">
+<li>
+<p><strong>If you have just torn down and re-applied Terraform:</strong> the first <code>terraform apply</code> after a destroy can fail on <code>aws_s3_object</code> refresh — the object it wants to read was removed by the destroy. If it does, run it again; it is not your bug. It does not always happen: a full <code>scripts/teardown-lab2.sh</code> followed by <code>terraform apply</code> succeeded on the first try on 2026-11-07.</p>
+</li>
+<li>
+<p><strong>After any IAM policy change, wait ~30 seconds before retrying.</strong> IAM propagation lag means an immediate retry returns the <em>old</em> error and makes a correct fix look broken.</p>
+</li>
+<li>
+<p><strong>Let your MLEngineer role write data capture.</strong> Task 1 tells you to enable <code>DataCaptureConfig</code>, and Lab 6 analyzes what it captures. The endpoint writes that data as its <strong>execution role</strong>, the MLEngineer role, and your Lab 1–2 policy grants S3 access only to <code>artifacts/*</code> and <code>features/*</code>. Without one more statement, capture fails <strong>silently</strong>. The endpoint reports <code>InService</code>, the config says <code>EnableCapture: true</code>, and nothing is ever written. This was verified on AWS: 41 invocations, zero objects, no error anywhere. Add this to the MLEngineer policy in your IAM module, then <code>terraform apply</code> and wait 30 seconds:</p>
+</li>
+</ol>
+<p><code>hcl
+         {
+           Sid      = "S3DataCaptureWrite"
+           Effect   = "Allow"
+           Action   = ["s3:PutObject", "s3:AbortMultipartUpload"]
+           Resource = "${local.bucket_arn}/datacapture/*"   # your data bucket ARN + /datacapture/*
+         },</code></p>
+<p>Check it once the endpoint has served traffic for a few minutes: <code>aws s3 ls s3://northstar-dev-data-&lt;account-id&gt;/datacapture/ --recursive | head</code> should list <code>.jsonl</code> files.</p>
+<ol start="6">
+<li><strong>Make the 7-day capture rule actually delete.</strong> Your Lab 2 <code>expire-datacapture</code> rule expires capture after 7 days, but your bucket is <strong>versioned</strong>. On a versioned bucket, expiring an object only hides it behind a delete marker. The captured inputs and scores stay in the bucket as an old version, indefinitely, and keep costing storage. Add one block to that rule in <code>modules/storage/main.tf</code>, then <code>terraform apply</code>:</li>
+</ol>
+<p><code>hcl
+     rule {
+       id     = "expire-datacapture"
+       # ... status, filter and expiration stay as they are ...
+       noncurrent_version_expiration {
+         noncurrent_days = 1
+       }
+     }</code></p>
+<p>Captured data is now hidden at day 7 and permanently deleted a day later (1 day is the shortest S3 allows). S3 removes the leftover delete markers on its own. Add the block <strong>inside</strong> the existing rule rather than as a new rule: <code>verify-lab2.sh</code> checks for exactly five lifecycle rules. Confirm it:</p>
+<p><code>bash
+   aws s3api get-bucket-lifecycle-configuration --bucket northstar-dev-data-&lt;account-id&gt; \
+     --query "Rules[?ID=='expire-datacapture'].[Expiration.Days,NoncurrentVersionExpiration.NoncurrentDays]" --output text
+   # 7  1</code></p>
+<p>Nothing you can list changes: objects older than 7 days were already hidden from <code>aws s3 ls</code>. What changes is that they are really gone, which your privacy assessment (Task 4) depends on.</p>
+<p><strong>Grading note for prerequisites 5 and 6.</strong> Neither is graded in Lab 5. If you deployed without them, you do not need to redeploy. Add both before Lab 6, which redeploys the endpoint and analyzes the captured data.</p>
+<h2 id="tasks">Tasks</h2>
+<h3 id="task-1-production-deployment-30-points">Task 1 — Production Deployment (30 points)</h3>
+<p>Deploy the churn model approved above.</p>
+<p><strong>Deployment approach (choose one — justify your choice in the deployment plan):</strong></p>
+<ul>
+<li><strong>Real-time endpoint</strong> (SageMaker Real-Time Inference) — for low-latency single-record scoring</li>
+<li><strong>Batch Transform</strong> (SageMaker Batch Transform) — for nightly batch churn scoring of the full customer base. <strong>Requires a quota request before you can run a single job</strong> — see <em>Batch Transform path: request transform quota on day one</em> below.</li>
+</ul>
+<p><strong>Requirements:</strong></p>
+<ul>
+<li><strong>Controlled rollout — not a direct swap of the endpoint config.</strong> What this means depends on your approach:</li>
+<li><em>Real-time, canary:</em> two production variants on one endpoint, new variant at <strong>10% initial traffic weight</strong>, promoted to 100% after a clean monitoring window.</li>
+<li><em>Real-time, blue/green:</em> the old endpoint stays <code>InService</code> until the new endpoint passes all smoke tests, then traffic cuts over and the old endpoint is deleted.</li>
+<li><em>Batch Transform, parallel run:</em> the new model runs as a <strong>shadow job over the same input manifest</strong> as the incumbent; you compare score distributions and disagreement rate before the new model's output feeds anything downstream. There is no traffic weight in batch — the parallel run and the comparison artifact are what earn the points.</li>
+<li><strong>Rollback trigger configured with a numeric threshold</strong> — specify the metric and the value. The trigger must exist <strong>as code</strong> in <code>deployment/configs/</code> (a CloudWatch alarm definition, Terraform resource, or deployment config), not only as prose in the plan. A threshold nobody wired up is a paragraph, not a control.</li>
+</ul>
+<blockquote>
+<p><strong><code>ModelLatency</code> is emitted in MICROSECONDS, not milliseconds.</strong> A 200 ms threshold is <code>200000</code>. Writing <code>200</code> sets the alarm to 0.2 ms, which is far below a healthy endpoint's normal latency — measured at roughly <strong>4,100 µs (4.1 ms)</strong> on <code>ml.m5.large</code> for this model. The alarm goes to <code>ALARM</code> immediately and stays there, and a rollback wired to it fires against a perfectly healthy deployment. Both behaviors verified on AWS. Check the <code>Unit</code> field in <code>get-metric-statistics</code> output before you pick any threshold.</p>
+</blockquote>
+<ul>
+<li><strong>Rollback action.</strong> The canary rollback is <code>update-endpoint-weights-and-capacities</code> setting the canary to weight 0. It takes about <strong>90 seconds</strong>; the endpoint reports <code>Updating</code> throughout but keeps serving with no dropped requests, and it does <strong>not</strong> stop the canary instance billing.</li>
+<li><strong>Auto-scaling policy (real-time only):</strong> target tracking on <code>SageMakerVariantInvocationsPerInstance</code> at 1000, scale-out cooldown 60s, scale-in cooldown 600s.</li>
+</ul>
+<p><strong>Start on <code>ml.t2.medium</code>.</strong> It is the cheapest real-time instance at $0.056/hr, and it is one of only three endpoint types your new AWS account has any quota for. Deploy the canary, observe the traffic split, wire the rollback alarm — all of that works.</p>
+<p>Then try to attach the auto-scaling policy. <strong>It will fail</strong>, and working out why is part of this task. See <em>Instance selection and quota</em> below before you start, so you can plan around it rather than discover it at 2 am.
+- <strong>Compressed monitoring window.</strong> Your <em>plan</em> documents the production cadence — a 48-hour canary window before promotion. Your <em>lab execution</em> observes for <strong>60 minutes</strong>, then promotes or rolls back. State the compression explicitly in the plan: what a 48-hour window would catch that 60 minutes cannot, and what you would additionally monitor in a real rollout. You are graded on identifying the gap, not on burning two days of endpoint time.
+- <strong>Everything deleted after the window closes and before submission.</strong> See Teardown.</p>
+<p><strong>Evidence.</strong> CLI output is authoritative; screenshots are optional supporting material. The AWS console's resource views lag by hours and have shown deleted resources as present in this course before — do not rely on them to prove anything. Capture, in <code>docs/lab5-deployment-output.txt</code>:</p>
+<ol>
+<li><code>aws sagemaker describe-endpoint</code> while live, showing both variants and their traffic weights</li>
+<li><code>aws application-autoscaling describe-scaling-policies --service-namespace sagemaker</code> while live</li>
+<li>The rollback alarm definition from <code>deployment/configs/</code>, plus <code>describe-alarms</code> showing its state</li>
+<li><strong>An observed traffic split.</strong> Invoke the endpoint at least 100 times and count the <code>InvokedProductionVariant</code> field in the responses. At 9:1 weights the reference run observed <strong>175 champion / 25 canary over 200 calls</strong>. This is stronger evidence than any screenshot: it proves traffic actually split, not merely that a config field was set.</li>
+<li>The same count re-run after rollback, showing 0 calls to the canary</li>
+<li>Post-teardown proof of no active endpoint (produced by the teardown script)</li>
+</ol>
+<p>To smoke-test one variant directly without waiting for the weights to route you there, pass <code>--target-variant</code>:</p>
+<pre><code class="language-bash">aws sagemaker-runtime invoke-endpoint --endpoint-name northstar-churn-prod \
+  --content-type text/csv --target-variant canary --body fileb://sample.csv out.txt
+</code></pre>
+<p><strong>Timings from the reference run</strong>, so you can plan the 60-minute window: endpoint creation ~7 minutes, <code>update-endpoint</code> to a new config ~4 minutes (zero downtime), weight shift ~90 seconds.</p>
+<h4 id="instance-selection-and-quota-read-this-on-day-one-not-on-the-due-date">Instance selection and quota — read this on day one, not on the due date</h4>
+<p>This part of the lab is deliberately shaped like a real production constraint. You will hit two walls in sequence. Both are real, both are survivable, and the second one has a <strong>waiting period you cannot compress</strong>, so start early.</p>
+<p><strong>Wall 1 — burstable instances cannot be auto-scaling targets.</strong></p>
+<p>You deploy on <code>ml.t2.medium</code> and everything works until you run <code>register-scalable-target</code>, which fails:</p>
+<pre><code>ValidationException: You cannot register a variant with
+ml.t2.medium instance type as a scalable target.
+</code></pre>
+<p>This is not a bug in your configuration, and there is no flag that fixes it. Burstable instances (<code>ml.t2.*</code>, <code>ml.t3.*</code>) accumulate CPU credits rather than delivering sustained performance, so Application Auto Scaling refuses to manage them — a scaling decision based on a credit-throttled instance would be meaningless. The fix is to move to a non-burstable instance type, and the obvious candidate is <code>ml.m5.large</code>.</p>
+<p>Note what this cost you: the endpoint deployed <em>fine</em>, served traffic <em>fine</em>, and failed only at the very last step — <strong>after it had already been billing for several minutes.</strong> A capability you assume is available because the resource looks healthy is a category of production failure worth internalizing.</p>
+<p><strong>Wall 2 — your account almost certainly has zero quota for <code>ml.m5.large</code>.</strong></p>
+<p>You switch the instance type, redeploy, and get:</p>
+<pre><code>ResourceLimitExceeded: The account-level service limit
+'ml.m5.large for endpoint usage' is 0 Instances, with current
+utilization of 0 Instances and a request delta of 1 Instance.
+</code></pre>
+<p><strong>This is expected. It is not a mistake you made.</strong></p>
+<p>New AWS accounts ship with a default quota of <strong>0</strong> for almost every on-demand SageMaker instance type. Of 251 endpoint instance types, exactly three have a non-zero default:</p>
+<table>
+<thead>
+<tr>
+<th>Instance type</th>
+<th>Default endpoint quota</th>
+<th>Auto-scaling target?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ml.t2.medium</code></td>
+<td>2</td>
+<td><strong>No</strong> — burstable</td>
+</tr>
+<tr>
+<td><code>ml.m6g.large</code></td>
+<td>2</td>
+<td>Yes (Graviton/ARM)</td>
+</tr>
+<tr>
+<td><code>ml.m6g.xlarge</code></td>
+<td>1</td>
+<td>Yes (Graviton/ARM)</td>
+</tr>
+<tr>
+<td><code>ml.m5.large</code></td>
+<td><strong>0</strong></td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<p>AWS raises these limits as an account demonstrates usage, which is why a colleague's older account may work where your new one does not. That difference between "works on my machine" and "works on a fresh account" is exactly what breaks enterprise deployments.</p>
+<p><strong>How to request the increase.</strong></p>
+<p>The quota is adjustable and the request is free. It is <code>ml.m5.large for endpoint usage</code>, quota code <strong><code>L-614B09FD</code></strong>, and it is <strong>regional</strong> — request it in the same region you deploy to (<code>us-east-1</code> for this course).</p>
+<pre><code class="language-bash"># Check what you currently have
+aws service-quotas get-service-quota \
+  --service-code sagemaker --quota-code L-614B09FD \
+  --region us-east-1 --query 'Quota.Value' --output text
+
+# Request an increase. Ask for 2 - enough for a two-variant canary.
+aws service-quotas request-service-quota-increase \
+  --service-code sagemaker --quota-code L-614B09FD \
+  --desired-value 2 --region us-east-1
+
+# Track it
+aws service-quotas list-requested-service-quota-change-history \
+  --service-code sagemaker --region us-east-1 \
+  --query 'RequestedQuotas[].[QuotaName,DesiredValue,Status]' --output text
+</code></pre>
+<p>You can also do this in the console: <strong>Service Quotas → AWS services → Amazon SageMaker → search <code>ml.m5.large for endpoint usage</code> → Request increase at account level.</strong></p>
+<p><strong>Ask for 2, not 20.</strong> Small, justified requests on standard instance types are routinely approved quickly; large ones attract review and take longer. You need 2 for a two-variant canary. Asking for more delays you and costs you more if you forget a teardown.</p>
+<blockquote>
+<p><strong>Timing is the real risk in this lab.</strong> Status moves <code>PENDING</code> → <code>CASE_OPENED</code> → <code>APPROVED</code>, and turnaround has ranged from minutes to several business days. <strong>File this request the day the lab is assigned</strong>, before you need it — you can do the entire <code>ml.t2.medium</code> portion of Task 1 while it is in flight. Waiting until the weekend before the deadline is the single most likely way to fail this lab for reasons that have nothing to do with your engineering.</p>
+</blockquote>
+<p><strong>If your increase has not landed in time</strong>, deploy on <code>ml.t2.medium</code>, capture the <code>register-scalable-target</code> rejection and your pending quota request as evidence, and write up the scaling design you <em>would</em> have applied. See the rubric — <strong>this path earns full credit on the auto-scaling item.</strong> You are graded on diagnosing and responding to the constraint, not on winning a race with AWS Support.</p>
+<p><strong>A note for Lab 6.</strong> Whatever instance you land on, <strong>enable <code>DataCaptureConfig</code></strong> — Lab 6's monitoring has nothing to analyze without it, and endpoint configs are immutable so it cannot be added later without a redeploy. <code>ml.t2.medium</code> supports data capture fully, so an unresolved quota request does not block Lab 6.</p>
+<h4 id="batch-transform-path-request-transform-quota-on-day-one">Batch Transform path: request transform quota on day one</h4>
+<p><strong>Skip this section if you are taking the real-time path.</strong></p>
+<p>Batch Transform has its <strong>own</strong> quotas, separate from endpoint quotas, and on a new account every one of them is <strong>0</strong>. All 113 transform instance types default to zero, including <code>ml.t2.medium</code>. Your endpoint quota does not carry over, so the first <code>create-transform-job</code> fails with:</p>
+<pre><code>ResourceLimitExceeded: The account-level service limit
+'ml.m5.large for transform job usage' is 0 Instances ...
+</code></pre>
+<p>This is the same wall as the endpoint quota above, and it has the same cure. <strong>Request it the day the lab is assigned</strong>, before you write any batch code.</p>
+<p><strong>What to request.</strong> Use <code>ml.m5.large for transform job usage</code>, quota code <strong><code>L-236AE59F</code></strong>, in <code>us-east-1</code>. It is the cheapest non-burstable transform instance at <strong>$0.115/hour</strong>, and a transform job stops billing when the job ends.</p>
+<ul>
+<li><strong>Ask for 1.</strong> One instance is enough to run the incumbent job and then the candidate job over the same input manifest, one after the other. Ask for 2 only if you want both jobs to run at the same time.</li>
+<li>Do not ask for <code>ml.m5.xlarge</code> (<code>L-7939E4EC</code>) or for 10 instances like the lecture example. A NorthStar-sized fleet is not needed for this dataset, and larger requests take longer to approve.</li>
+</ul>
+<p><strong>Step by step (CLI):</strong></p>
+<pre><code class="language-bash"># 1. Confirm the default is 0 (this is what every new account sees)
+aws service-quotas get-aws-default-service-quota \
+  --service-code sagemaker --quota-code L-236AE59F \
+  --region us-east-1 --query 'Quota.Value' --output text
+
+# 2. Request the increase. 1 instance runs the shadow comparison sequentially.
+aws service-quotas request-service-quota-increase \
+  --service-code sagemaker --quota-code L-236AE59F \
+  --desired-value 1 --region us-east-1
+
+# 3. Track it until Status is APPROVED
+aws service-quotas list-requested-service-quota-change-history \
+  --service-code sagemaker --region us-east-1 \
+  --query 'RequestedQuotas[].[QuotaName,DesiredValue,Status]' --output text
+
+# 4. After approval, confirm the applied value is 1 or more
+aws service-quotas get-service-quota \
+  --service-code sagemaker --quota-code L-236AE59F \
+  --region us-east-1 --query 'Quota.Value' --output text
+</code></pre>
+<p><strong>Step by step (console):</strong></p>
+<ol>
+<li>Open the quota page directly: <a href="https://us-east-1.console.aws.amazon.com/servicequotas/home/services/sagemaker/quotas/L-236AE59F" target="_blank" rel="noopener">ml.m5.large for transform job usage (us-east-1)</a>. Or go to <strong>Service Quotas → AWS services → Amazon SageMaker</strong> and search <code>ml.m5.large for transform job usage</code>.</li>
+<li>Check that the region selector in the top-right reads <strong>US East (N. Virginia)</strong>.</li>
+<li>Choose <strong>Request increase at account level</strong>, enter <strong>1</strong>, and submit.</li>
+<li>Track the request under <strong>Service Quotas → Quota request history</strong>.</li>
+</ol>
+<p><strong>Reference documentation:</strong></p>
+<ul>
+<li><a href="https://docs.aws.amazon.com/servicequotas/latest/userguide/request-quota-increase.html" target="_blank" rel="noopener">Requesting a quota increase</a> (Service Quotas User Guide)</li>
+<li><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/regions-quotas.html" target="_blank" rel="noopener">Amazon SageMaker endpoints and quotas</a></li>
+<li><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/batch-transform.html" target="_blank" rel="noopener">Batch transform for inference</a></li>
+<li><a href="https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_CreateTransformJob.html" target="_blank" rel="noopener"><code>CreateTransformJob</code> API reference</a>: set <code>TransformResources.InstanceType</code> to <code>ml.m5.large</code> and <code>InstanceCount</code> to <code>1</code></li>
+</ul>
+<p><strong>Evidence.</strong> Put the approved request (step 3 output showing <code>APPROVED</code>) in <code>docs/lab5-deployment-output.txt</code> alongside the two transform job descriptions (<code>aws sagemaker describe-transform-job</code>) and your output comparison.</p>
+<p><strong>If the request has not been approved by Saturday, November 7</strong>, switch to the real-time canary path on <code>ml.t2.medium</code>, which your account can run today without any quota request. Say in your deployment plan that you switched and why, and include the pending request as evidence. A week before the deadline is the latest point where switching still leaves time to finish Task 1.</p>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+<th>Evidence (in your <code>lab5-submit</code> commit)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Deployment approach justified in the deployment plan</td>
+<td>5</td>
+<td>Justification references NorthStar's scoring frequency requirements — not generic latency/throughput tradeoffs</td>
+<td><code>docs/lab5-deployment-plan.md</code>, section 1</td>
+</tr>
+<tr>
+<td>Canary, blue/green, or batch parallel run configured (not direct swap)</td>
+<td>12</td>
+<td><strong>Observed</strong> traffic split from ≥100 invocations, parallel endpoints, or a shadow batch job with a documented output comparison — not merely a config field</td>
+<td><code>docs/lab5-deployment-output.txt</code> sections 1, 4 and 5; <code>deployment/configs/endpoint-config-canary.json</code>. Batch: both <code>describe-transform-job</code> outputs in <code>docs/lab5-deployment-output.txt</code>, plus <code>docs/lab5-batch-comparison.md</code></td>
+</tr>
+<tr>
+<td>Rollback trigger defined with numeric threshold <strong>and present as code</strong></td>
+<td>8</td>
+<td>Names the metric (e.g., <code>ModelLatency</code> p95) and the threshold value; a matching alarm/config exists in <code>deployment/configs/</code>; <strong>units are correct</strong> — a <code>ModelLatency</code> threshold of <code>200</code> instead of <code>200000</code> fails this item</td>
+<td><code>deployment/configs/rollback-alarm.json</code>; <code>docs/lab5-deployment-output.txt</code> section 3; <code>deployment/configs/rollback-action.sh</code></td>
+</tr>
+<tr>
+<td>Auto-scaling configured <strong>or</strong> constraint correctly diagnosed; monitoring-window compression documented</td>
+<td>5</td>
+<td><strong>Full credit either way.</strong> Either (a) a scaling policy in CLI output while live on a non-burstable instance, or (b) the <code>ml.t2.medium</code> rejection captured, the burstable cause explained in one sentence, a filed quota request shown as evidence, and the intended scaling config written out. Plan states the 48h → 60min compression and what it trades away in both cases.</td>
+<td><code>docs/lab5-deployment-output.txt</code> section 2; <code>deployment/configs/scalable-target.json</code> and <code>scaling-policy.json</code>; <code>docs/lab5-deployment-plan.md</code>, section 4</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-2-operational-deployment-plan-20-points">Task 2 — Operational Deployment Plan (20 points)</h3>
+<p>Write a deployment plan in <code>docs/lab5-deployment-plan.md</code> that a teammate who has never seen this project could execute. Target: 600–900 words.</p>
+<p><strong>Required sections:</strong></p>
+<ol>
+<li><strong>Deployment strategy and rationale</strong> — why this strategy for this system?</li>
+<li><strong>Pre-deployment checklist</strong> — what must be true before the deployment begins? Include the model-approval step and who performs it.</li>
+<li><strong>Rollback criteria</strong> — exact metric, exact threshold, who makes the call</li>
+<li><strong>Monitoring window</strong> — how long, what you are watching, what constitutes a clean deployment, and the lab-vs-production compression from Task 1</li>
+<li><strong>Stakeholder notifications</strong> — who gets notified at each stage (deployment start, promotion, rollback)</li>
+<li><strong>Post-deployment review</strong> — when it happens, who attends, what artifact it produces</li>
+<li><strong>Resource cleanup</strong> — which resources are deleted after the monitoring window, in what order, and how cleanup is verified</li>
+</ol>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+<th>Evidence (in your <code>lab5-submit</code> commit)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Document is executable by a stranger</td>
+<td>10</td>
+<td>TA review: could a new team member follow this without asking questions? Commands are copy-pasteable; no undefined names</td>
+<td><code>docs/lab5-deployment-plan.md</code></td>
+</tr>
+<tr>
+<td>Rollback criteria are numeric and unambiguous</td>
+<td>6</td>
+<td>Metric name + threshold number stated explicitly, and consistent with the alarm in <code>deployment/configs/</code></td>
+<td><code>docs/lab5-deployment-plan.md</code>, section 3, checked against <code>deployment/configs/rollback-alarm.json</code></td>
+</tr>
+<tr>
+<td>Stakeholder notification list is complete</td>
+<td>4</td>
+<td>Names roles (not individuals) and what each receives at each stage</td>
+<td><code>docs/lab5-deployment-plan.md</code>, section 5</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-3-security-assessment-25-points">Task 3 — Security Assessment (25 points)</h3>
+<p>Document the security posture of the NorthStar churn model in <code>docs/lab5-security-assessment.md</code>.</p>
+<p><strong>3a. STRIDE Threat Model (15 points)</strong></p>
+<p>Apply STRIDE to the churn prediction system. Identify at least <strong>five threats</strong>, distributed across at least <strong>3 STRIDE categories</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Threat</th>
+<th>STRIDE Category</th>
+<th>Likelihood (H/M/L)</th>
+<th>Impact (H/M/L)</th>
+<th>Mitigation</th>
+<th>AWS Control</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[e.g., Attacker queries endpoint to infer training data via membership inference]</td>
+<td>Information Disclosure</td>
+<td>Medium</td>
+<td>High</td>
+<td>[mitigation]</td>
+<td>[control]</td>
+</tr>
+</tbody>
+</table>
+<p>Your platform already has a least-privilege boundary: the three IAM roles from Lab 2 — <code>MLEngineer</code> (SageMaker training and serving, <code>features/</code> and <code>artifacts/</code>; no Athena or Glue access, since the Lab 3 Athena query runs under your own credentials), <code>DataEngineer</code> (Glue and data prefixes), and <code>ModelMonitor</code> (CloudWatch plus read-only artifacts). At least one threat's mitigation must reference which of these roles contains the blast radius, and at least one must identify a gap those roles do <strong>not</strong> close.</p>
+<p><strong>3b. Data Classification (10 points)</strong></p>
+<p>Classify all NorthStar data assets by sensitivity tier. For each asset specify: tier (Public / Internal / Confidential / Restricted), encryption standard (SSE-S3, SSE-KMS, or CSE), IAM access policy, and whether the asset can be shared with a third-party vendor.</p>
+<p>Assets to classify: customer PII, transaction history, behavioral clickstream, product catalog, model weights, inference logs, Feature Store records.</p>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+<th>Evidence (in your <code>lab5-submit</code> commit)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>≥5 STRIDE threats across ≥3 categories</td>
+<td>10</td>
+<td>Table complete; each row has all fields; at least one row maps to an existing Lab 2 IAM role and one names a gap</td>
+<td><code>docs/lab5-security-assessment.md</code>, STRIDE table</td>
+</tr>
+<tr>
+<td>Mitigations reference specific AWS services</td>
+<td>5</td>
+<td>Each mitigation names the AWS service and the control — not "use encryption"</td>
+<td><code>docs/lab5-security-assessment.md</code>, STRIDE table</td>
+</tr>
+<tr>
+<td>All 7 data assets classified</td>
+<td>10</td>
+<td>Classification table complete; SSE-KMS distinguished from S3-managed encryption with a stated reason for each choice</td>
+<td><code>docs/lab5-security-assessment.md</code>, classification table</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-4-privacy-compliance-assessment-15-points">Task 4 — Privacy &amp; Compliance Assessment (15 points)</h3>
+<p>Write a privacy impact assessment for the churn model in <code>docs/lab5-security-assessment.md</code>.</p>
+<p><strong>Required sections:</strong></p>
+<ol>
+<li><strong>Personal data inventory</strong> — what personal data is processed, in which pipeline stage</li>
+<li><strong>Lawful basis</strong> — under GDPR, what is the lawful basis for processing customer purchase history for churn prediction? (Choose one: legitimate interests, contractual necessity, consent — justify your choice.)</li>
+<li><strong>Data minimization</strong> — what data was considered and excluded from training as unnecessary?</li>
+<li><strong>Right to erasure workflow</strong> — NorthStar receives a GDPR deletion request for <code>customer_id = C00123456</code>. Describe the steps to remove that customer's data from (a) raw S3 data, (b) the Feature Store, (c) the model training data, and (d) inference logs. Which step is hardest? Why?</li>
+</ol>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+<th>Evidence (in your <code>lab5-submit</code> commit)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lawful basis justified with specifics</td>
+<td>5</td>
+<td>Names one basis and explains why it applies to NorthStar's retention use case</td>
+<td><code>docs/lab5-security-assessment.md</code>, privacy impact assessment</td>
+</tr>
+<tr>
+<td>Deletion workflow covers all 4 data stores</td>
+<td>6</td>
+<td>Each store addressed with a concrete step; the Feature Store answer distinguishes online from offline store</td>
+<td><code>docs/lab5-security-assessment.md</code>, privacy impact assessment</td>
+</tr>
+<tr>
+<td>Hardest step correctly identified with reasoning</td>
+<td>4</td>
+<td>Identifies the trained model (or the offline Feature Store's append-only history) and explains why deletion there is not a delete operation</td>
+<td><code>docs/lab5-security-assessment.md</code>, privacy impact assessment</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-5-repository-quality-10-points">Task 5 — Repository Quality (10 points)</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+<th>Evidence (in your <code>lab5-submit</code> commit)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No credentials in code</td>
+<td>4</td>
+<td><code>bash scripts/check-secrets.sh</code> exits clean; <code>.env</code> is in <code>.gitignore</code></td>
+<td>Every commit in your history, which the TA scans with <code>scripts/check-secrets.sh</code>; <code>.gitignore</code></td>
+</tr>
+<tr>
+<td>Deployment config is code (not console clicks)</td>
+<td>3</td>
+<td>Endpoint config, scaling policy, and rollback alarm live in <code>deployment/configs/</code></td>
+<td><code>deployment/configs/endpoint-config-canary.json</code>, <code>scalable-target.json</code>, <code>scaling-policy.json</code>, <code>rollback-alarm.json</code></td>
+</tr>
+<tr>
+<td>Lab 4 CI/CD extended with a security check</td>
+<td>3</td>
+<td>At least one security validation step in your pipeline definition. <strong><code>buildspec.yml</code> counts</strong> — a CodeBuild phase running a secret scan, dependency audit, or IAM policy lint is full credit; you do not need CodePipeline for this</td>
+<td><code>buildspec.yml</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="traps-already-mapped-do-not-rediscover">Traps Already Mapped — do not rediscover</h2>
+<ol>
+<li><strong>Endpoints bill hourly until deleted.</strong> The trap this lab exists to teach. Rolling back to weight 0 does not stop the charge.</li>
+<li><strong><code>ml.t2.medium</code> cannot be an auto-scaling target.</strong> Burstable types are rejected by <code>RegisterScalableTarget</code>. Moving to <code>ml.m5.large</code> fixes it, but that instance has a default account quota of <strong>0</strong> — see <em>Instance selection and quota</em> in Task 1. Both walls are expected; plan for them.</li>
+<li><strong><code>ModelLatency</code> is in microseconds.</strong> 200 ms is <code>200000</code>. Normal is ~4,100 µs.</li>
+<li><strong>The XGBoost save warning is benign.</strong> XGBoost 3.x prints <em>"Saving model in the UBJSON format as default"</em>; the <code>sagemaker-xgboost:1.7-1</code> container loads it correctly. Verified end to end — do not go chasing this one.</li>
+<li><strong>IAM propagation lag ~30s.</strong> After a policy change, an immediate retry shows the old error.</li>
+<li><strong>Non-ASCII in AWS-facing <code>description</code> / <code>Description</code> fields.</strong> EC2 rejects em dashes, IAM accepts them, so failures look arbitrary. Keep every description ASCII-only.</li>
+<li><strong>First <code>terraform apply</code> after a teardown can fail</strong> on <code>aws_s3_object</code> refresh. Re-run it. Not every teardown triggers it.</li>
+<li><strong>The console lags hours.</strong> Verify against the live API, never the console index.</li>
+<li><strong>Colon inside an echo string breaks buildspec YAML.</strong> <code>echo "BUILD: done"</code> parses as a dict and CodeBuild rejects the whole file before running anything. Relevant if you edit <code>buildspec.yml</code> for Task 5.</li>
+<li><strong>Batch Transform quota is 0 on a new account, and it is separate from endpoint quota.</strong> Every transform instance type defaults to zero. Request <code>ml.m5.large for transform job usage</code> (<code>L-236AE59F</code>) the day the lab opens if you take the batch path. See <em>Batch Transform path: request transform quota on day one</em> in Task 1.</li>
+</ol>
+<h2 id="teardown-required-read-before-you-submit">Teardown (required — read before you submit)</h2>
+<pre><code class="language-bash">bash scripts/teardown-lab5.sh
+</code></pre>
+<p>The Lab 5 script deletes scaling policies and scalable targets, the rollback alarms, endpoints, endpoint configs and SageMaker models, stops in-flight jobs, then verifies against the live API and writes <code>docs/lab5-teardown-output.txt</code> — the evidence file this lab is graded on.</p>
+<blockquote>
+<p><strong>Auto-scaling does not orphan.</strong> Deleting the endpoint automatically deregisters the scalable target, deletes its scaling policies, and deletes the <code>TargetTracking-*</code> alarms that target tracking created for you. Verified directly: registered a target, deleted only the endpoint, and all three were gone within 90 seconds. The teardown script still removes them explicitly so that the run is deterministic and the verification block means something when resources were created by hand.</p>
+</blockquote>
+<p>Use the Lab 5 script rather than <code>scripts/teardown-lab3.sh</code>: the Lab 3 script does not delete SageMaker Models or your rollback alarms, does not assert on scaling targets, and writes to <code>docs/lab3-teardown-output.txt</code> — the wrong evidence file for this lab.</p>
+<p>If you are also finished with the Lab 2 data platform, run <code>scripts/teardown-lab2.sh</code> afterwards — and remember <code>terraform destroy</code> alone does not fully clean up (see Lab 2's teardown section).</p>
+<p><strong>Replace <code>scripts/teardown-lab2.sh</code> with the current Lab 2 kit version before you run it (changed Nov 7).</strong> The earlier version deleted <em>every</em> SageMaker lineage record in the account, including your Lab 4 Model Registry lineage and your Lab 5 endpoint lineage. It also counted other labs' leftover lineage as a failure and printed "Resources may still be billing" when nothing was. Lineage is metadata and is not billed. The current script removes only the Lab 2 feature group's lineage and reports the rest without failing. Get it from the Lab 2 starter kit on Canvas or the <a href="https://github.com/byu-cs401r4-f26/cs401r-lab2-template" target="_blank" rel="noopener">lab2 template repo</a>.</p>
+<p><strong>If you ran a Glue job in the last 15 minutes, wait before running <code>teardown-lab2.sh</code>.</strong> A Glue job's network interfaces stay attached for several minutes after the job finishes. The script removes only detached ones, so the attached ones are left in the private subnet, and <code>terraform destroy</code> then sits on <code>Still destroying...</code> for the subnet and security group. Observed 2026-11-07: still attached when the script ran a few minutes after a job, detached about 10 minutes later. If <code>destroy</code> is already hanging, open a second terminal and delete the interfaces once they read <code>available</code>; <code>destroy</code> then finishes on its own:</p>
+<pre><code class="language-bash">for e in $(aws ec2 describe-network-interfaces \
+    --filters Name=status,Values=available &quot;Name=description,Values=Attached to Glue*&quot; \
+    --query 'NetworkInterfaces[].NetworkInterfaceId' --output text); do
+  aws ec2 delete-network-interface --network-interface-id &quot;$e&quot; &amp;&amp; echo &quot;deleted $e&quot;
+done
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+<th>Evidence (in your <code>lab5-submit</code> commit)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Teardown evidence submitted</td>
+<td>—</td>
+<td><strong>Gate, not points:</strong> <code>docs/lab5-teardown-output.txt</code> shows no endpoints, no endpoint configs, and no registered scaling targets. Task 1 is capped at half credit until produced.</td>
+<td><code>docs/lab5-teardown-output.txt</code>. If you tore down by hand before Nov 5: <code>docs/lab5-deployment-output.txt</code> section 6, all three counts <code>0</code></td>
+</tr>
+<tr>
+<td>Endpoint running after the deadline</td>
+<td>−10</td>
+<td>Applied in addition to the gate above</td>
+<td><code>docs/lab5-teardown-output.txt</code>, timestamped before the deadline</td>
+</tr>
+</tbody>
+</table>
+</body></html>
