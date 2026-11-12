@@ -53,7 +53,8 @@ MODEL_PACKAGE_GROUP = "northstar-churn-models"
 FRAMEWORK_VERSION = "1.7-1"
 
 
-def build_pipeline(role_arn: str, bucket: str, region: str = "us-east-1") -> Pipeline:
+def build_pipeline(role_arn: str, bucket: str, region: str = "us-east-1",
+                   spot: bool = True) -> Pipeline:
     boto_session = boto3.Session(region_name=region)
     # PipelineSession, not Session. With a plain Session the estimator's .fit()
     # executes a training job immediately at definition time instead of being
@@ -118,8 +119,15 @@ def build_pipeline(role_arn: str, bucket: str, region: str = "us-east-1") -> Pip
         # restart after an interruption, and must be >= max_run. No
         # checkpointing: the job trains in seconds, so an interrupted job
         # simply restarts from scratch.
-        use_spot_instances=True,
-        max_wait=3600,
+        #
+        # spot=False (--on-demand) is the escape hatch for when spot capacity
+        # is unavailable. Seen 2026-11-11: ml.g5.xlarge and ml.g6.xlarge spot
+        # in us-east-1 sat in "Insufficient capacity" for 3+ hours across
+        # three 60-minute max_wait windows. On-demand GPU training quota is 1
+        # per type on this account, so ml.g5.xlarge on-demand runs; the job
+        # trains in seconds, so the cost difference is cents.
+        use_spot_instances=spot,
+        max_wait=3600 if spot else None,
     )
 
     train_step = TrainingStep(
@@ -198,9 +206,13 @@ def main():
                     help="Create or update the pipeline in SageMaker")
     ap.add_argument("--definition-out", default=None,
                     help="Write the resolved JSON definition here (no AWS mutation)")
+    ap.add_argument("--on-demand", action="store_true",
+                    help="Train on on-demand capacity instead of managed spot "
+                         "(use when spot capacity is unavailable)")
     args = ap.parse_args()
 
-    pipeline = build_pipeline(args.role_arn, args.bucket, args.region)
+    pipeline = build_pipeline(args.role_arn, args.bucket, args.region,
+                              spot=not args.on_demand)
 
     if args.definition_out:
         with open(args.definition_out, "w") as f:

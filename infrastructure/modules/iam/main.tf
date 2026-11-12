@@ -98,6 +98,12 @@ resource "aws_iam_policy" "ml_engineer" {
         ]
       },
       {
+        "Sid" : "S3DataCaptureWrite",
+        "Effect" : "Allow",
+        "Action" : ["s3:PutObject", "s3:AbortMultipartUpload"],
+        "Resource" : "arn:aws:s3:::${var.project}-${var.environment}-data-*/datacapture/*"
+      },
+      {
         "Sid" : "S3BucketList",
         "Effect" : "Allow",
         "Action" : ["s3:ListBucket", "s3:GetBucketLocation"],
