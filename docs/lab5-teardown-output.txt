@@ -1,0 +1,13 @@
+Lab 5 teardown verification - 2026-11-14T21:01:02Z
+Account: 182243447601  Region: us-east-1
+
+  SageMaker endpoints              OK
+  Endpoint configs                 OK
+  SageMaker models                 OK
+  Auto-scaling targets             OK
+  Transform jobs running           OK
+  Processing jobs running          OK
+
+==> Lab 5 teardown complete. No billable inference resources remain.
+    Model Registry entries are metadata only and cost nothing - kept.
+    Run scripts/teardown-lab2.sh as well if you are done with the data platform.

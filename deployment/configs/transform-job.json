@@ -1,0 +1,36 @@
+{
+  "TransformJobName": "SET_AT_RUNTIME",
+  "ModelName": "SET_AT_RUNTIME",
+  "MaxConcurrentTransforms": 1,
+  "MaxPayloadInMB": 6,
+  "BatchStrategy": "MultiRecord",
+  "TransformInput": {
+    "DataSource": {
+      "S3DataSource": {
+        "S3DataType": "S3Prefix",
+        "S3Uri": "SET_AT_RUNTIME"
+      }
+    },
+    "ContentType": "text/csv",
+    "SplitType": "Line",
+    "CompressionType": "None"
+  },
+  "TransformOutput": {
+    "S3OutputPath": "SET_AT_RUNTIME",
+    "Accept": "text/csv",
+    "AssembleWith": "Line"
+  },
+  "TransformResources": {
+    "InstanceType": "ml.m5.large",
+    "InstanceCount": 1
+  },
+  "DataProcessing": {
+    "InputFilter": "$[1:]",
+    "JoinSource": "Input",
+    "OutputFilter": "$[0,-1]"
+  },
+  "Tags": [
+    {"Key": "project", "Value": "northstar"},
+    {"Key": "lab", "Value": "lab5"}
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "AlarmName": "northstar-churn-rollback-disagreement",
+  "AlarmDescription": "Roll back the churn candidate (reject it in the Model Registry) when more than 5 percent of customers get a different churn label (score >= 0.5) from the candidate than from the incumbent in the weekly batch run.",
+  "Namespace": "NorthStar/ChurnBatch",
+  "MetricName": "PredictionDisagreementPct",
+  "Dimensions": [{"Name": "Pipeline", "Value": "northstar-churn-batch"}],
+  "Statistic": "Maximum",
+  "Period": 300,
+  "EvaluationPeriods": 1,
+  "DatapointsToAlarm": 1,
+  "Threshold": 5,
+  "ComparisonOperator": "GreaterThanThreshold",
+  "TreatMissingData": "ignore",
+  "Unit": "Percent"
+}
