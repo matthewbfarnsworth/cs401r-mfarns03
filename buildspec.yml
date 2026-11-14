@@ -79,6 +79,14 @@ phases:
     commands:
       - echo "PRE-BUILD PHASE - Tests"
 
+      # ── Security Scan (Lab 5) ──────────────────────────────────────────
+      # Runs first so a HIGH-severity finding fails the build before any data
+      # is downloaded or tested. -lll reports HIGH severity only; bandit exits
+      # 1 on any finding, which fails this phase.
+      - echo "Running security scan"
+      - pip install --quiet bandit
+      - bandit -r models data scripts -lll
+
       # Stage pipeline output locally so the data tests have something to
       # validate. Without this the tests fail immediately - which is correct
       # behaviour: a CI run that cannot see the data must not report success.
@@ -107,18 +115,6 @@ phases:
       # this early and its gate tests skip on missing inputs, which reads as a
       # pass and means the promotion gate never actually ran. It is invoked in
       # the build phase instead, against the real metrics.
-
-      # ── Security Scan ──────────────────────────────────────────────────
-      # TODO: Uncomment after Lab 5 (security hardening)
-      # - bandit -r . -ll --exclude ./tests -f json -o reports/security_scan.json
-      # - cat reports/security_scan.json | python -c "
-      #     import json, sys
-      #     report = json.load(sys.stdin)
-      #     highs = [r for r in report['results'] if r['issue_severity'] == 'HIGH']
-      #     if highs:
-      #         print(f'SECURITY: {len(highs)} HIGH severity issues found')
-      #         sys.exit(1)
-      #   "
 
       - echo "All pre-build tests passed ✓"
 
