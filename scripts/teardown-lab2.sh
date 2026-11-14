@@ -14,9 +14,10 @@
 #   3. SageMaker NFS SGs    - two auto-created security groups block VPC deletion
 #   4. S3 object versions   - versioned bucket cannot be deleted while non-empty
 #   5. Feature Store catalog- the sagemaker_featurestore Glue database and table
-#   6. SageMaker lineage    - contexts and artifacts created by the feature group;
-#                             they survive DeleteFeatureGroup and must have their
-#                             associations removed before they will delete
+#   6. SageMaker lineage    - the contexts and artifact created by the feature group
+#                             (and ONLY those); they survive DeleteFeatureGroup and
+#                             must have their associations removed before they
+#                             will delete
 #
 # Items 1-3 make destroy hang for 10+ minutes before failing. Item 2 is the one
 # that actually costs money after you think you are done.
@@ -156,25 +157,43 @@ fi
 # Feature Store creates lineage contexts and a DataSet artifact. DeleteFeatureGroup
 # leaves them behind, and they refuse to delete while associations exist, so the
 # association graph has to be unwound first.
-echo "[6/7] Removing orphaned SageMaker lineage contexts and artifacts"
-for arn in $(aws sagemaker list-contexts --query 'ContextSummaries[*].ContextArn' --output text 2>/dev/null | tr '\t' '\n') \
-           $(aws sagemaker list-artifacts --query 'ArtifactSummaries[*].ArtifactArn' --output text 2>/dev/null | tr '\t' '\n'); do
-  [ -z "${arn}" ] && continue
-  aws sagemaker list-associations --destination-arn "${arn}" \
-    --query 'AssociationSummaries[*].[SourceArn,DestinationArn]' --output text 2>/dev/null | \
-  while read -r src dst; do
-    [ -z "${src}" ] && continue
-    aws sagemaker delete-association --source-arn "${src}" --destination-arn "${dst}" >/dev/null 2>&1 \
-      && echo "      unlinked ${src##*/} -> ${dst##*/}"
+echo "[6/7] Removing Lab 2's SageMaker lineage (feature group only)"
+# ONLY the lineage Lab 2's feature group creates. Observed on a rebuild
+# (2026-11-07): creating northstar-dev-customer-features adds three contexts
+# named "<feature group>-<epoch>", "...-feature-group-pipeline" and
+# "...-feature-group-pipeline-version", and one DataSet artifact whose source
+# is the feature group's offline-store prefix. They survive DeleteFeatureGroup.
+#
+# This step used to unlink and delete EVERY lineage context and artifact in
+# the account. Run after Lab 4, that deleted the Model Registry's own lineage
+# (the model-package-group context, 2026-11-07) and the endpoint lineage of
+# whatever Lab 5 had deployed. Lineage is metadata and is never billed, so
+# nothing outside Lab 2 is worth that risk. Do not widen the filters below.
+FG="${PROJECT}-${ENVIRONMENT}-customer-features"
+lab2_ctx=$(aws sagemaker list-contexts \
+  --query "ContextSummaries[?starts_with(ContextName, '${FG}-')].ContextArn" --output text 2>/dev/null | tr '\t' '\n')
+lab2_art=$(aws sagemaker list-artifacts \
+  --query "ArtifactSummaries[?contains(Source.SourceUri, '/offline-store/${FG}-')].ArtifactArn" --output text 2>/dev/null | tr '\t' '\n')
+for arn in ${lab2_ctx} ${lab2_art}; do
+  [ -z "${arn}" ] || [ "${arn}" = "None" ] && continue
+  # Associations in both directions block deletion.
+  for side in --destination-arn --source-arn; do
+    aws sagemaker list-associations ${side} "${arn}" \
+      --query 'AssociationSummaries[*].[SourceArn,DestinationArn]' --output text 2>/dev/null | \
+    while read -r src dst; do
+      [ -z "${src}" ] && continue
+      aws sagemaker delete-association --source-arn "${src}" --destination-arn "${dst}" >/dev/null 2>&1 \
+        && echo "      unlinked ${src##*/} -> ${dst##*/}"
+    done
   done
 done
-for a in $(aws sagemaker list-artifacts --query 'ArtifactSummaries[*].ArtifactArn' --output text 2>/dev/null | tr '\t' '\n'); do
-  [ -z "${a}" ] && continue
+for a in ${lab2_art}; do
+  [ -z "${a}" ] || [ "${a}" = "None" ] && continue
   aws sagemaker delete-artifact --artifact-arn "${a}" >/dev/null 2>&1 && echo "      deleted artifact ${a##*/}"
 done
-for c in $(aws sagemaker list-contexts --query 'ContextSummaries[*].ContextName' --output text 2>/dev/null | tr '\t' '\n'); do
-  [ -z "${c}" ] && continue
-  aws sagemaker delete-context --context-name "${c}" >/dev/null 2>&1 && echo "      deleted context ${c}"
+for c in ${lab2_ctx}; do
+  [ -z "${c}" ] || [ "${c}" = "None" ] && continue
+  aws sagemaker delete-context --context-name "${c##*/}" >/dev/null 2>&1 && echo "      deleted context ${c##*/}"
 done
 
 # Empty CloudWatch log groups left by Glue job and crawler runs.
@@ -209,8 +228,24 @@ check "Feature groups"    "aws sagemaker list-feature-groups --query 'length(Fea
 check "EFS filesystems"   "aws efs describe-file-systems --query 'length(FileSystems)' --output text"
 check "Glue jobs"         "aws glue list-jobs --query 'length(JobNames)' --output text"
 check "NorthStar VPCs"    "aws ec2 describe-vpcs --filters Name=tag:Project,Values=${PROJECT} --query 'length(Vpcs)' --output text"
-check "Lineage contexts"  "aws sagemaker list-contexts --query 'length(ContextSummaries)' --output text"
-check "Lineage artifacts" "aws sagemaker list-artifacts --query 'length(ArtifactSummaries)' --output text"
+# Lineage contexts and artifacts are metadata: SageMaker does not bill for
+# them, and leftovers do not block the next terraform apply (re-applied with 33
+# present on 2026-11-07). Step 6 removes Lab 2's own; everything else belongs
+# to other labs -- chiefly the Model Registry packages Lab 4 created and Lab 5
+# deploys -- and is left alone on purpose. Counting them as
+# STILL PRESENT failed this teardown for every account that had a Lab 4
+# package, with "Resources may still be billing" when nothing was (35 left,
+# 2026-11-07). Report the count; never fail on it. A failed AWS call still
+# fails, as in check().
+info () {
+  if ! raw=$(eval "$2" 2>/dev/null); then
+    printf "      %-22s CHECK FAILED (AWS call errored; credentials/region?)\n" "$1"; fail=1; return
+  fi
+  n=$(printf '%s\n' "${raw}" | awk '{ s += $1 } END { print s + 0 }')
+  printf "      %-22s %s left (metadata, not billed; not a failure)\n" "$1" "${n}"
+}
+info  "Lineage contexts"  "aws sagemaker list-contexts --query 'length(ContextSummaries)' --output text"
+info  "Lineage artifacts" "aws sagemaker list-artifacts --query 'length(ArtifactSummaries)' --output text"
 check "Glue databases"    "aws glue get-databases --query 'length(DatabaseList)' --output text"
 
 echo ""
