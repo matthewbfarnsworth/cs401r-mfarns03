@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Lab 6: Monitoring &amp; Reliability</title>
+<style>
+ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+      line-height:1.55;max-width:52rem;margin:2rem auto;padding:0 1.25rem;color:#1a1a1a}
+ code{background:#f4f4f4;padding:.12em .35em;border-radius:3px;font-size:.92em}
+ pre{background:#f4f4f4;padding:1rem;border-radius:5px;overflow-x:auto}
+ pre code{background:none;padding:0}
+ table{border-collapse:collapse;width:100%;margin:1rem 0}
+ th,td{border:1px solid #ccc;padding:.5rem .6rem;text-align:left;vertical-align:top}
+ th{background:#f0f0f0}
+ blockquote{border-left:4px solid #c8102e;margin:1rem 0;padding:.4rem 1rem;background:#fafafa}
+ h1,h2,h3{line-height:1.25} hr{border:none;border-top:1px solid #ddd;margin:2rem 0}
+</style></head><body>
+<h1 id="lab-6-monitoring-reliability">Lab 6: Monitoring &amp; Reliability</h1>
+<p><strong>Assigned:</strong> Thu Nov 12 | <strong>Due:</strong> Sat Nov 28, midnight
+<strong>Chapters:</strong> <em>Metrics, Benchmarks &amp; Guardrails</em>, <em>Monitoring &amp; Observability</em>, <em>Reliability Engineering</em>
+<strong>Builds on:</strong> Labs 1–5 — instruments the production system deployed in Lab 5</p>
+<h2 id="objective">Objective</h2>
+<p>A deployed model with no monitoring is a liability. This lab instruments the NorthStar platform end-to-end: five monitoring layers, a full alert architecture, SLOs with error budgets, and operational runbooks for failure scenarios. After this lab, your platform can fail gracefully and recover fast.</p>
+<h2 id="starter-kit">Starter Kit</h2>
+<p>Download <strong>Lab6 Starter Kit</strong> from the Week 11 module, or copy the files from https://github.com/byu-cs401r4-f26/cs401r-lab6-template. Unzip it at the root of your <code>cs401r-&lt;your-netid&gt;</code> repo; every file lands at the path this handout uses.</p>
+<ul>
+<li><code>scripts/preflight-lab6.sh</code>: checks data capture, the execution role, and processing quota before you spend anything. Run it first.</li>
+<li><code>scripts/teardown-lab6.sh</code>: stops in-flight processing jobs, then deletes the endpoint and everything else Lab 6 bills for. Writes <code>docs/lab6-teardown-output.txt</code>.</li>
+<li><code>monitoring/run_evidently_job.py</code>: the launcher. Uploads the analysis script, checks that captured data exists, and runs the processing job.</li>
+<li><code>monitoring/evidently_drift.py</code>: the analysis that runs inside the job. <strong><code>drift_direction()</code> is a stub you implement</strong>, and <code>DRIFT_PLAN</code> is a starting point you change to match your Task 2 plan. The launcher refuses to start a job until the stub is gone.</li>
+<li><code>deployment/configs/canary_deploy_realtime.py</code>: rolls a new endpoint config with data capture on (Prerequisite 1). Reads the <code>deployment/configs/sample.csv</code> you created in Lab 5.</li>
+</ul>
+<p>You write the CloudWatch metric publisher yourself (Task 1), and you add one IAM role, <code>ModelMonitorExecution</code>, from the Terraform in Prerequisite 2. Everything else comes from Labs 1–5: the other IAM roles from Lab 2 and the endpoint from Lab 5.</p>
+<blockquote>
+<p><strong>Added Wed Nov 18, 2026.</strong> The handout always ran these scripts, but no starter kit shipped them. If you started earlier, copy them into your repo now. The due date is unchanged.</p>
+<p><strong>Updated Wed Nov 18, 2026, evening.</strong> If you downloaded the kit before this update, download it again. Changes from a full reference run on AWS: <code>run_evidently_job.py</code> uploads the analysis script under <code>monitoring/</code> (the only prefix the execution role can read); <code>evidently_drift.py</code> drops duplicate test payloads (trap 13); <code>teardown-lab6.sh</code> no longer reports a clean region as live; and the kit no longer contains <code>deployment/configs/sample.csv</code>, which overwrote your Lab 5 file. If yours was overwritten, restore it with <code>git checkout lab5-submit -- deployment/configs/sample.csv</code>. Prerequisites 2 and 3 are new.</p>
+<p><strong>Added Thu Nov 19, 2026.</strong> <em>Submitting Lab 6</em> now lists every task, every file the TA grades, and what each file must show, with a capture block for the evidence that only exists while the endpoint is live. No criteria or points changed. Read it before you deploy.</p>
+</blockquote>
+<hr />
+<h2 id="getting-your-repository">Getting Your Repository</h2>
+<p>Keep working in the repository you created for Lab 1, <code>cs401r-&lt;your-netid&gt;</code>.
+This lab extends the platform you already built; <strong>do not start a new repository.</strong></p>
+<hr />
+<h2 id="submitting-lab-6">Submitting Lab 6</h2>
+<p>Read this section before you deploy anything. Half of the Task 1 evidence (the metrics
+behind each dashboard layer, the drift jobs, the alarm states) can only be captured
+<strong>while the endpoint is live</strong>, and the lab requires you to delete the endpoint before
+you submit. Once it is gone, that evidence cannot be recreated without deploying again
+and paying for it again.</p>
+<h3 id="what-you-submit-in-canvas">What you submit in Canvas</h3>
+<ol>
+<li>Commit everything in the table below to <code>main</code>.</li>
+<li>Tag that commit and push the tag:</li>
+</ol>
+<p><code>bash
+   git tag lab6-submit
+   git push origin main lab6-submit</code></p>
+<ol start="3">
+<li>Submit <strong>your repository URL</strong> in Canvas. Do not submit the tag name. It is always
+   <code>lab6-submit</code> for this lab, and the TA looks for it.</li>
+</ol>
+<p>The TA grades <code>git checkout lab6-submit</code>, so anything you push afterwards while
+starting the next lab does not change this lab's grade. <strong>If you forget the tag, you
+are graded at your last commit before the Canvas deadline</strong> — which, if you have already
+started the next lab, may not be the work you meant to submit. Tag it.</p>
+<p><strong>The TA grades your repository, never your AWS account.</strong> By the deadline your endpoint
+must be deleted, so nothing in AWS is left to inspect. If the evidence is not committed,
+the TA treats the task as not done. <strong>CLI output is the evidence.</strong> Screenshots are
+optional. The console lags the live API by hours, so a screenshot proves nothing the CLI
+output does not.</p>
+<h3 id="the-tasks-at-a-glance">The tasks at a glance</h3>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Points</th>
+<th>What you do</th>
+<th>Where it lands</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Prerequisites</td>
+<td>—</td>
+<td>Add the <code>ModelMonitorExecution</code> role and the two <code>PutMetricData</code> grants; roll a data-capture endpoint</td>
+<td><code>infrastructure/modules/iam/</code></td>
+</tr>
+<tr>
+<td>1 — Five-layer monitoring</td>
+<td>35</td>
+<td>Baseline, Evidently drift job, metric publisher, <code>NorthStar-AI-Platform</code> dashboard</td>
+<td><code>monitoring/</code>, <code>docs/lab6-monitoring-output.txt</code></td>
+</tr>
+<tr>
+<td>2 — Drift detection plan</td>
+<td>15</td>
+<td>Drift types, a test and threshold per feature, a concept-drift proxy with its lag</td>
+<td><code>docs/lab6-runbook.md</code></td>
+</tr>
+<tr>
+<td>3 — Alert architecture</td>
+<td>15</td>
+<td>≥ 6 tiered alerts, escalation per tier, ≥ 1 suppression rule</td>
+<td><code>monitoring/alerts/</code></td>
+</tr>
+<tr>
+<td>4 — SLO design</td>
+<td>15</td>
+<td>Four SLOs with numeric error budgets and freeze triggers</td>
+<td><code>docs/lab6-runbook.md</code></td>
+</tr>
+<tr>
+<td>5 — Runbooks</td>
+<td>20</td>
+<td>Two runbooks in the required structure</td>
+<td><code>docs/lab6-runbook.md</code></td>
+</tr>
+<tr>
+<td>Teardown</td>
+<td>gate</td>
+<td><code>scripts/teardown-lab6.sh</code>, every region clean</td>
+<td><code>docs/lab6-teardown-output.txt</code></td>
+</tr>
+</tbody>
+</table>
+<p>Tasks 2–5 are 65 of the 100 points and need no AWS at all. Do not leave them for the last
+evening.</p>
+<h3 id="the-complete-list">The complete list</h3>
+<p>File names under <code>docs/</code> are exact. Other paths are the ones the commands below and the
+starter kit use; keep them and the commands work as written.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Task</th>
+<th>What it must show</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docs/lab6-monitoring-output.txt</code></td>
+<td>1</td>
+<td>Sections 1–12 from the capture block below: endpoint with capture on, captured objects per variant, the baseline in S3, your drift jobs, a datapoint for each of the five layers, the alarms and their states, the dashboard, and the post-teardown check</td>
+</tr>
+<tr>
+<td><code>monitoring/baseline/baseline.csv</code></td>
+<td>1</td>
+<td>A header row plus your Lab 2 training customers, <strong>exactly the 11 features the endpoint receives</strong>, in <code>FEATURE_COLUMNS</code> order. No <code>churn_label</code>, no <code>churn_risk_score</code></td>
+</tr>
+<tr>
+<td><code>monitoring/evidently_drift.py</code></td>
+<td>1, 2</td>
+<td><code>drift_direction()</code> implemented so PSI drifts on <code>value &gt; threshold</code> and KS drifts on <code>value &lt; threshold</code>. <code>DRIFT_PLAN</code> matches the per-feature table in your Task 2 plan</td>
+</tr>
+<tr>
+<td><code>monitoring/reports/drift_report.json</code> and <code>drift_violations.json</code></td>
+<td>1</td>
+<td>Downloaded from <code>s3://&lt;bucket&gt;/monitoring/reports/&lt;job&gt;/</code> after a <code>Completed</code> job. <code>captured_records</code> ≥ 500, <code>underpowered_window: false</code>. Zero violations is a pass. Fabricated drift is not</td>
+</tr>
+<tr>
+<td><code>monitoring/publish_metrics.py</code></td>
+<td>1</td>
+<td>Your publisher: reads <code>drift_violations.json</code> and calls <code>put_metric_data</code> from your laptop for the model layer and the business-layer metric</td>
+</tr>
+<tr>
+<td><code>monitoring/dashboards/northstar-dashboard.json</code></td>
+<td>1</td>
+<td>Valid CloudWatch dashboard JSON, exported from the live <code>NorthStar-AI-Platform</code> dashboard, at least one widget bound to a real metric per layer</td>
+</tr>
+<tr>
+<td><code>monitoring/alerts/</code></td>
+<td>3</td>
+<td>Alarm Terraform and/or a spec document: ≥ 6 alerts with P1–P4 tiers, an escalation action per tier, ≥ 1 suppression rule. Every <code>ModelLatency</code> threshold in <strong>microseconds</strong></td>
+</tr>
+<tr>
+<td><code>docs/lab6-runbook.md</code></td>
+<td>2, 4, 5</td>
+<td>The drift plan (three required parts), the four-row SLO table with error budgets and freeze triggers, and two runbooks with all six sections filled</td>
+</tr>
+<tr>
+<td><code>infrastructure/modules/iam/main.tf</code> and <code>outputs.tf</code></td>
+<td>prereq</td>
+<td>The <code>ModelMonitorExecution</code> role and policy, and the <code>PutMetricData</code> statements for MLEngineer and DataEngineer. Not graded on its own, but the drift job cannot run without them</td>
+</tr>
+<tr>
+<td><code>docs/lab6-teardown-output.txt</code></td>
+<td>gate</td>
+<td>Written by <code>scripts/teardown-lab6.sh</code>. Ends with <code>TEARDOWN COMPLETE</code> and every region <code>clean</code></td>
+</tr>
+<tr>
+<td><code>docs/lab6-mlflow-runs.txt</code></td>
+<td>1</td>
+<td>Optional. <code>mlflow.search_runs</code> output for the <code>northstar-drift</code> experiment. No rubric line, but it is the record Lab 7 builds on</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Do not commit Terraform state from <code>monitoring/alerts/</code>.</strong> Running <code>terraform apply</code>
+there writes <code>terraform.tfstate</code> next to your <code>.tf</code> file. The provided <code>.gitignore</code>
+excludes <code>*.tfstate</code>. Check <code>git status</code> before you add the directory.</p>
+<h3 id="how-to-capture-the-evidence-two-windows">How to capture the evidence: two windows</h3>
+<p>You capture evidence twice: once with everything live, and once after teardown. Run every
+block from the repo root.</p>
+<p><strong>Helpers.</strong> Paste these into each new terminal first. The start time is computed in
+Python so the same line works on macOS and Linux. Change <code>NS</code> and the metric names in
+sections 5 and 6 if your publisher writes different ones.</p>
+<pre><code class="language-bash">OUT=docs/lab6-monitoring-output.txt
+EP=northstar-churn-prod
+ACCT=$(aws sts get-caller-identity --query Account --output text)
+B=northstar-dev-data-$ACCT
+NS=NorthStar/ChurnModel
+S=$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(hours=12)).strftime(&quot;%Y-%m-%dT%H:%M:%SZ&quot;))')
+E=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cap () { echo; echo &quot;===== $1  ($(date -u +%Y-%m-%dT%H:%M:%SZ)) =====&quot;; }
+</code></pre>
+<p><strong>Window 1: everything live.</strong> Run it after your drift job has completed, your publisher
+has run, your alarms exist and your dashboard is saved, and <strong>before</strong> you tear down. This
+block creates the file. Window 2 appends to it.</p>
+<pre><code class="language-bash">{
+  echo &quot;Lab 6 monitoring evidence - account $ACCT&quot;
+  cap &quot;1. Endpoint, variants, data capture&quot;
+  aws sagemaker describe-endpoint --endpoint-name $EP \
+    --query '{Status:EndpointStatus,Config:EndpointConfigName,Variants:ProductionVariants[].{Name:VariantName,Weight:CurrentWeight},Capture:DataCaptureConfig}'
+  cap &quot;2. Captured objects per variant&quot;
+  for v in champion canary; do
+    echo &quot;$v: $(aws s3 ls s3://$B/datacapture/$EP/$v/ --recursive | wc -l | tr -d ' ') files&quot;
+  done
+  cap &quot;3. Baseline in S3&quot;
+  aws s3 ls s3://$B/monitoring/baseline/
+  cap &quot;4. Drift jobs&quot;
+  for j in $(aws sagemaker list-processing-jobs --name-contains nsc-evidently \
+               --query 'ProcessingJobSummaries[].ProcessingJobName' --output text); do
+    aws sagemaker describe-processing-job --processing-job-name $j \
+      --query '{Job:ProcessingJobName,Status:ProcessingJobStatus,Role:RoleArn,Instance:ProcessingResources.ClusterConfig.InstanceType,Start:ProcessingStartTime,End:ProcessingEndTime}'
+  done
+  cap &quot;5. Business layer: custom metric&quot;
+  aws cloudwatch get-metric-statistics --namespace $NS --metric-name ChurnAlertVolume \
+    --dimensions Name=EndpointName,Value=$EP \
+    --start-time $S --end-time $E --period 3600 --statistics Maximum
+  cap &quot;6. Model layer: drift metric&quot;
+  aws cloudwatch get-metric-statistics --namespace $NS --metric-name DriftDetected \
+    --dimensions Name=EndpointName,Value=$EP \
+    --start-time $S --end-time $E --period 300 --statistics Maximum \
+    --query 'Datapoints[].[Timestamp,Maximum]' --output text
+  cap &quot;7. Pipeline layer: recent Glue job runs&quot;
+  for j in northstar-dev-transform northstar-dev-feature-engineer; do
+    aws glue get-job-runs --job-name $j \
+      --query 'JobRuns[:3].[JobName,StartedOn,JobRunState,ExecutionTime]' --output text
+  done
+  cap &quot;8. Application layer: ModelLatency p50/p95/p99 on champion (MICROSECONDS)&quot;
+  aws cloudwatch get-metric-statistics --namespace AWS/SageMaker --metric-name ModelLatency \
+    --dimensions Name=EndpointName,Value=$EP Name=VariantName,Value=champion \
+    --start-time $S --end-time $E --period 3600 --extended-statistics p50 p95 p99 \
+    --query 'Datapoints[].[Timestamp,ExtendedStatistics.p50,ExtendedStatistics.p95,ExtendedStatistics.p99]' --output text
+  cap &quot;9. Infrastructure layer: CPU and memory on champion&quot;
+  for m in CPUUtilization MemoryUtilization; do
+    echo &quot;-- $m&quot;
+    aws cloudwatch get-metric-statistics --namespace /aws/sagemaker/Endpoints --metric-name $m \
+      --dimensions Name=EndpointName,Value=$EP Name=VariantName,Value=champion \
+      --start-time $S --end-time $E --period 3600 --statistics Average Maximum \
+      --query 'Datapoints[].[Timestamp,Average,Maximum]' --output text
+  done
+  cap &quot;10. Alarms: threshold and state&quot;
+  aws cloudwatch describe-alarms \
+    --query 'MetricAlarms[?contains(AlarmName,`northstar`)].[AlarmName,MetricName,Threshold,StateValue]' --output text
+  cap &quot;11. Dashboard&quot;
+  aws cloudwatch list-dashboards --dashboard-name-prefix NorthStar-AI-Platform \
+    --query 'DashboardEntries[].[DashboardName,LastModified]' --output text
+} 2&gt;&amp;1 | tee &quot;$OUT&quot;
+</code></pre>
+<p>Name every alarm with <code>northstar</code> in it. Section 10 and <code>scripts/teardown-lab6.sh</code> both
+find alarms by that string; an alarm without it is invisible to both and keeps billing.</p>
+<p>Sections 5–9 pass dimensions as separate arguments on purpose. On macOS the default shell
+is zsh, which does not split <code>--dimensions $D</code> into two arguments the way bash does, and
+the call fails with a parse error. Percentiles need <code>--extended-statistics</code>; asking
+<code>--statistics</code> for <code>p95</code> returns nothing, and an empty result looks exactly like missing
+data.</p>
+<p><strong>Window 2: after teardown.</strong> Run <code>bash scripts/teardown-lab6.sh</code>. It writes
+<code>docs/lab6-teardown-output.txt</code>. Then:</p>
+<pre><code class="language-bash">{
+  cap &quot;12. After teardown: live API&quot;
+  echo &quot;endpoints:              $(aws sagemaker list-endpoints --query 'length(Endpoints)' --output text)&quot;
+  echo &quot;running processing jobs: $(aws sagemaker list-processing-jobs --status-equals InProgress --query 'length(ProcessingJobSummaries)' --output text)&quot;
+  echo &quot;northstar alarms:       $(aws cloudwatch describe-alarms --query 'length(MetricAlarms[?contains(AlarmName,`northstar`)])' --output text)&quot;
+} 2&gt;&amp;1 | tee -a &quot;$OUT&quot;
+</code></pre>
+<p>All three must read <code>0</code>.</p>
+<h3 id="before-you-tag">Before you tag</h3>
+<p>Open <code>docs/lab6-monitoring-output.txt</code> and read it. An <code>AccessDenied</code> line, or a section
+header with nothing under it, means that section captured nothing. Sections 7 and 9 empty
+usually mean Prerequisite 3 is missing, not that the system is idle (trap 15). Re-run
+while the endpoint is still up, not after. Then:</p>
+<pre><code class="language-bash">grep -c '^===== ' docs/lab6-monitoring-output.txt          # 12
+head -1 monitoring/baseline/baseline.csv | tr ',' '\n' | wc -l   # 11
+grep -c 'raise NotImplementedError' monitoring/evidently_drift.py   # 0
+python3 -c &quot;import json; d=json.load(open('monitoring/reports/drift_violations.json')); print(d['captured_records'], d['underpowered_window'], d['violation_count'])&quot;
+python3 -c &quot;import json; print(len(json.load(open('monitoring/dashboards/northstar-dashboard.json'))['widgets']), 'widgets')&quot;
+grep -rn --include='*.tf' -E '(metric_name|threshold) *=' monitoring/alerts/   # each ModelLatency: 200000 / 500000, not 200 / 500
+grep 'TEARDOWN COMPLETE' docs/lab6-teardown-output.txt
+bash scripts/check-secrets.sh                               # CLEAN
+git status --short monitoring/alerts/                       # no terraform.tfstate
+git add docs/ monitoring/ infrastructure/modules/iam/
+git commit -m &quot;Lab 6: monitoring, alerts, SLOs, runbooks, evidence&quot;
+git tag lab6-submit &amp;&amp; git push origin main lab6-submit
+</code></pre>
+<blockquote>
+<p><strong>Public repositories, deliberately.</strong> You may read how other students approached
+the problem. Copying their work is plagiarism and is handled under the BYU Honor
+Code — commit your own. And because these are public: never commit credentials.
+No <code>.env</code>, no <code>terraform.tfvars</code>, no AWS keys. Committed secrets are an automatic
+zero. The provided <code>.gitignore</code> already excludes them; do not remove those lines.</p>
+</blockquote>
+<hr />
+<h2 id="read-this-first-cost">Read This First — Cost</h2>
+<p><strong>Lab 6 is the most expensive lab in this course.</strong> Not because any one resource is costly, but because it is the only lab that asks you to leave an hourly-billing resource running while you wait for something to happen.</p>
+<p>Lab 5 taught you that a SageMaker endpoint bills from <code>InService</code> until deletion. Lab 6 re-creates that endpoint <em>and</em> adds a second billing source:</p>
+<table>
+<thead>
+<tr>
+<th>Resource</th>
+<th>Rate</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Endpoint — <code>ml.t2.medium</code></td>
+<td><strong>$0.056 / hr</strong></td>
+<td>Where Lab 5 starts you</td>
+</tr>
+<tr>
+<td>Endpoint — <code>ml.m5.large</code></td>
+<td><strong>$0.115 / hr</strong></td>
+<td>Only if your Lab 5 quota increase came through</td>
+</tr>
+<tr>
+<td>Evidently processing job</td>
+<td><strong>$0.05 / hr</strong></td>
+<td><code>ml.t3.medium</code>, billed per second, only while a job runs</td>
+</tr>
+<tr>
+<td>CloudWatch alarm</td>
+<td>$0.10 / alarm-month</td>
+<td>Prorated hourly; 6 alerts ≈ $0.60/mo if left</td>
+</tr>
+<tr>
+<td>CloudWatch custom metric</td>
+<td>$0.30 / metric-month</td>
+<td><strong>Not prorated</strong> — you pay for the month</td>
+</tr>
+<tr>
+<td>CloudWatch dashboard</td>
+<td>free (first 3)</td>
+<td>Then $3/mo</td>
+</tr>
+</tbody>
+</table>
+<p>The drift job is the cheapest thing in this lab. <strong>Measured 2026-08-07 on <code>ml.t3.medium</code>: 10,000 baseline rows against 800 captured records ran in 1 min 59 s of billed instance time and cost about $0.0017.</strong> Round it to a fifth of a cent per run. Run it ten times while you get the inputs right and you have spent two cents.</p>
+<p>Your bill in this lab is essentially the endpoint, and only the endpoint.</p>
+<p>What this actually costs you — the column that applies depends on which instance Lab 5 left you on:</p>
+<table>
+<thead>
+<tr>
+<th>If you…</th>
+<th>On <code>ml.t2.medium</code></th>
+<th>On <code>ml.m5.large</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Work in one focused session and tear down (3 h)</td>
+<td><strong>$0.49</strong></td>
+<td><strong>$0.67</strong></td>
+</tr>
+<tr>
+<td>Leave it running overnight (14 h)</td>
+<td><strong>$1.13</strong></td>
+<td><strong>$1.95</strong></td>
+</tr>
+<tr>
+<td>Forget for three days (72 h)</td>
+<td><strong>$4.47</strong></td>
+<td><strong>$8.72</strong></td>
+</tr>
+<tr>
+<td>Forget for a week (168 h)</td>
+<td><strong>$10.01</strong></td>
+<td><strong>$19.93</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Burn rate with the endpoint live and one drift run per hour: <strong>$0.0577/hr</strong> on <code>t2.medium</code>, <strong>$0.1167/hr</strong> on <code>m5.large</code>.</p>
+<blockquote>
+<p><strong>A single forgotten Lab 6 endpoint breaches the entire course account's $10/month budget alarm in 168 hours (7 days) on <code>t2.medium</code>, or 83 hours (3.5 days) on <code>m5.large</code>.</strong> You have a 16-day submission window, so either number is reachable by simply forgetting. Do the lab in one sitting and tear it down.</p>
+</blockquote>
+<p><strong>Read that table for what it is actually telling you.</strong> Every meaningful number in it is the endpoint. The monitoring — the entire subject of this lab — rounds to nothing. That is the normal shape of production ML economics: <em>serving</em> is the recurring cost, and <em>observability</em> is close to free by comparison. The instinct to skip monitoring to save money is backwards, and this bill is the proof.</p>
+<p>If you automate the analysis on a timer (EventBridge, a cron job, a loop), <strong>that timer keeps launching billable jobs whether or not you are still working, and whether or not the endpoint still exists.</strong> <code>scripts/teardown-lab5.sh</code> knows nothing about monitoring. <strong>Use <code>scripts/teardown-lab6.sh</code></strong> — it stops in-flight processing jobs before deleting the endpoint.</p>
+<h2 id="why-this-lab-uses-evidently-and-not-sagemaker-model-monitor">Why this lab uses Evidently and not SageMaker Model Monitor</h2>
+<p>SageMaker Model Monitor is the obvious tool for this lab, and you cannot use it. <strong>Monitoring schedules are closed to new AWS accounts:</strong></p>
+<pre><code>ValidationException: This operation is in maintenance mode and is not
+available to new customers. Existing customers are unaffected.
+</code></pre>
+<p>Both <code>CreateMonitoringSchedule</code> and <code>CreateDataQualityJobDefinition</code> return this. It is not a quota, not a permission, and not something you did wrong — AWS closed the API to accounts that were not already using it. <strong>Every account in this course is new.</strong> No permission fixes it and there is nothing to request.</p>
+<p>So this lab uses <strong><a href="https://github.com/evidentlyai/evidently" target="_blank" rel="noopener">Evidently</a></strong>, an open-source Python library for drift detection, running inside a SageMaker Processing Job. You keep the managed compute; you drop the managed control plane that was closed to you.</p>
+<blockquote>
+<p><strong>Do not confuse this with Amazon CloudWatch Evidently.</strong> That was an unrelated AWS service for feature flags and A/B experiments, it never did model monitoring, and AWS ended support for it on <strong>16 October 2025</strong>. If you find AWS documentation for "Evidently", it is almost certainly about the dead feature-flag service. The library you want is <code>pip install evidently</code> and its docs are at <code>docs.evidentlyai.com</code>.</p>
+</blockquote>
+<p>This substitution is worth more than it costs. A managed schedule is a checkbox that hides the analysis behind it. Running Evidently yourself means you must decide <em>what test to run on which feature at what threshold</em> — which is exactly what Task 2 asks you to justify, and exactly the judgement the checkbox was making silently on your behalf.</p>
+<p>There is also a practical dividend: Model Monitor's analyzer is a Spark container that needs 8 GB. Evidently is pandas. It runs comfortably on the cheapest instance you have quota for.</p>
+<h2 id="prerequisites-do-this-before-task-1">Prerequisites — do this before Task 1</h2>
+<p>Run the pre-flight check:</p>
+<pre><code class="language-bash">bash scripts/preflight-lab6.sh
+</code></pre>
+<h3 id="0-use-mlt3medium-and-understand-why-you-have-no-other-choice">0. Use <code>ml.t3.medium</code> — and understand why you have no other choice</h3>
+<p><strong>Your AWS account's processing-job quota is 0 for every non-burstable instance type.</strong> Not low — zero. <code>ml.m5.large</code>, <code>ml.c5.*</code>, <code>ml.m4.*</code>, <code>ml.r5.*</code> and every other general-purpose family will reject the job immediately:</p>
+<pre><code>ResourceLimitExceeded: The account-level service limit
+'ml.m5.large for processing job usage' is 0 Instances
+</code></pre>
+<p>Of the 126 processing instance types, exactly <strong>three</strong> have a non-zero AWS default, and all three are burstable: <code>ml.t3.medium</code> (4), <code>ml.t3.large</code> (4), <code>ml.t3.xlarge</code> (2). Verified against <code>get-aws-default-service-quota</code> on 2026-07-31.</p>
+<p>Check your own before you start:</p>
+<pre><code class="language-bash">aws service-quotas get-service-quota --service-code sagemaker \
+  --quota-code L-0CE343FE --query 'Quota.Value' --output text   # ml.t3.medium processing
+</code></pre>
+<p><strong><code>ml.t3.medium</code> (4 GB) is enough.</strong> Verified 2026-08-07: a 10,000-row baseline against 800 captured records completed in <strong>1 min 59 s</strong> of billed time. You do not need <code>ml.t3.large</code> and you must not file a quota increase for this lab.</p>
+<blockquote>
+<p><strong>This is where the tool choice pays for itself.</strong> The same comparison under Model Monitor's Spark analyzer <strong>fails</strong> on <code>ml.t3.medium</code> — it exhausts 4 GB, takes <strong>13 min 43 s</strong> to do it, and then blames your data instead of the instance: <em>"Please use an instance type with more memory, or reduce the size of job data processed on an instance."</em> That message sends you off shrinking a dataset that was never the problem. Evidently on the same instance and the same data finishes in under two minutes.</p>
+<p><strong>Note the inversion from Lab 5.</strong> Lab 5's trap was that <em>burstable instances cannot be auto-scaling targets</em> — you were forced off <code>ml.t3.*</code> onto <code>ml.m5.large</code>. In Lab 6 the constraint runs exactly the other way: burstable is the only class with any default processing quota at all. Same instance family, opposite conclusion, one lab apart.</p>
+<p><strong>Endpoint quota, training quota, and processing quota are three completely separate numbers</strong>, and having one tells you nothing about the others. <code>ml.m5.large</code> has a <em>different</em> quota for each. The AWS default for all three on-demand families is 0. An endpoint that deployed fine in Lab 5 tells you nothing about whether a processing job will run in Lab 6.</p>
+</blockquote>
+<h3 id="1-your-endpoint-must-have-data-capture-enabled">1. Your endpoint must have data capture enabled</h3>
+<p>Evidently analyzes inference data that the endpoint captured to S3. <strong>No capture means nothing to analyze.</strong> The launcher checks the capture prefix before it starts a billable job and refuses to launch against an empty one — but understand what it is protecting you from.</p>
+<p><strong>Endpoint configs are immutable.</strong> Capture cannot be switched on for a running endpoint. If your endpoint was deployed without it, you must create a new endpoint config and call <code>update-endpoint</code> (~3 min 47 s, zero downtime):</p>
+<pre><code class="language-bash">python deployment/configs/canary_deploy_realtime.py \
+  --model-package-arn &lt;arn&gt; --role-arn &lt;arn&gt;
+</code></pre>
+<p>Capture lands under <code>s3://&lt;bucket&gt;/datacapture/&lt;endpoint&gt;/&lt;variant&gt;/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;hh&gt;/</code>. It is written <strong>asynchronously</strong> and lags several minutes behind your first invocation. Baselining against an empty prefix fails with a confusing schema error, not a helpful "no input" error — so invoke the endpoint, wait, and confirm objects exist before you baseline.</p>
+<h3 id="2-use-the-modelmonitorexecution-role-not-the-modelmonitor-role">2. Use the ModelMonitorExecution role, not the ModelMonitor role</h3>
+<p>The platform has two similarly named roles, and they are <strong>not interchangeable</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>What it is</th>
+<th>Use for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>northstar-dev-ModelMonitor</code></td>
+<td><strong>Observer</strong> identity. Read-only by design: no S3 write, no ECR pull.</td>
+<td>Humans and automation that watch the platform</td>
+</tr>
+<tr>
+<td><code>northstar-dev-ModelMonitorExecution</code></td>
+<td><strong>Service execution</strong> identity. Writes reports, pulls the container.</td>
+<td><strong>The Evidently processing job — this lab</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The drift job is a batch job whose entire purpose is to <em>write</em> its findings (<code>drift_report.json</code>, <code>drift_violations.json</code>) and it cannot start without pulling its container from ECR. Hand it the observer role and the job fails several minutes in as an opaque <code>ProcessingJobStatus: Failed</code>.</p>
+<p>This distinction — an identity that observes versus an identity that executes — is the design point, not a technicality. Note it in your Task 3 deliverable.</p>
+<p><strong>You have to create <code>ModelMonitorExecution</code> yourself.</strong> Lab 2 created only the observer role. Add the block below to the end of <code>infrastructure/modules/iam/main.tf</code>, plus the output after it to <code>infrastructure/modules/iam/outputs.tf</code>, then <code>terraform apply</code> and wait 30 seconds for IAM to propagate. <code>scripts/preflight-lab6.sh</code> checks that the role exists and prints the ARN to pass as <code>--role-arn</code>.</p>
+<pre><code class="language-hcl"># ── ModelMonitorExecution (Lab 6) ────────────────────────────────────────────
+resource &quot;aws_iam_role&quot; &quot;model_monitor_execution&quot; {
+  name = &quot;${var.project}-${var.environment}-ModelMonitorExecution&quot;
+
+  assume_role_policy = jsonencode({
+    Version = &quot;2012-10-17&quot;
+    Statement = [{
+      Effect    = &quot;Allow&quot;
+      Principal = { Service = &quot;sagemaker.amazonaws.com&quot; }
+      Action    = &quot;sts:AssumeRole&quot;
+    }]
+  })
+}
+
+resource &quot;aws_iam_policy&quot; &quot;model_monitor_execution&quot; {
+  name        = &quot;${var.project}-${var.environment}-ModelMonitorExecutionPolicy&quot;
+  description = &quot;Evidently drift job: pull the sklearn image, read datacapture and monitoring, write monitoring reports&quot;
+
+  policy = jsonencode({
+    Version = &quot;2012-10-17&quot;
+    Statement = [
+      {
+        Sid    = &quot;ECRPullProcessingImage&quot;
+        Effect = &quot;Allow&quot;
+        Action = [
+          &quot;ecr:GetAuthorizationToken&quot;,
+          &quot;ecr:BatchCheckLayerAvailability&quot;,
+          &quot;ecr:GetDownloadUrlForLayer&quot;,
+          &quot;ecr:BatchGetImage&quot;
+        ]
+        Resource = &quot;*&quot;
+      },
+      {
+        Sid      = &quot;S3BucketList&quot;
+        Effect   = &quot;Allow&quot;
+        Action   = [&quot;s3:ListBucket&quot;, &quot;s3:GetBucketLocation&quot;]
+        Resource = local.bucket_arn
+      },
+      {
+        Sid    = &quot;ReadCaptureBaselineAndCode&quot;
+        Effect = &quot;Allow&quot;
+        Action = [&quot;s3:GetObject&quot;]
+        Resource = [
+          &quot;${local.bucket_arn}/datacapture/*&quot;,
+          &quot;${local.bucket_arn}/monitoring/*&quot;
+        ]
+      },
+      {
+        Sid      = &quot;WriteMonitoringReports&quot;
+        Effect   = &quot;Allow&quot;
+        Action   = [&quot;s3:PutObject&quot;, &quot;s3:AbortMultipartUpload&quot;]
+        Resource = &quot;${local.bucket_arn}/monitoring/*&quot;
+      },
+      {
+        Sid    = &quot;CloudWatchLogs&quot;
+        Effect = &quot;Allow&quot;
+        Action = [
+          &quot;logs:CreateLogGroup&quot;,
+          &quot;logs:CreateLogStream&quot;,
+          &quot;logs:PutLogEvents&quot;,
+          &quot;logs:DescribeLogStreams&quot;
+        ]
+        Resource = &quot;arn:aws:logs:*:*:log-group:/aws/sagemaker/*&quot;
+      }
+    ]
+  })
+}
+
+resource &quot;aws_iam_role_policy_attachment&quot; &quot;model_monitor_execution&quot; {
+  role       = aws_iam_role.model_monitor_execution.name
+  policy_arn = aws_iam_policy.model_monitor_execution.arn
+}
+</code></pre>
+<pre><code class="language-hcl">output &quot;model_monitor_execution_role_arn&quot; {
+  description = &quot;ARN of the ModelMonitorExecution role - the Evidently processing job runs as this (Lab 6)&quot;
+  value       = aws_iam_role.model_monitor_execution.arn
+}
+</code></pre>
+<p>Read what the policy leaves out. The role can write only under <code>monitoring/</code>, so a drift job can never overwrite the <code>raw/</code>, <code>features/</code> or <code>artifacts/</code> data it is judging. It has no CloudWatch write, because you publish metrics from your laptop. If your Lab 2 module names the bucket ARN something other than <code>local.bucket_arn</code>, use your name.</p>
+<blockquote>
+<p><strong>Added Wed Nov 18, 2026.</strong> Earlier versions of this handout said this role came from Lab 2. It never did, so the drift job had no role to run as.</p>
+</blockquote>
+<h3 id="3-let-your-endpoint-and-your-glue-jobs-publish-metrics">3. Let your endpoint and your Glue jobs publish metrics</h3>
+<p>Two layers of your dashboard come from metrics AWS publishes <strong>as your roles</strong>, and neither Lab 2 role is allowed to. Nothing errors. The endpoint serves and the Glue jobs succeed, and the infrastructure and pipeline widgets stay empty.</p>
+<ul>
+<li>The endpoint's CPU, memory and disk metrics (<code>/aws/sagemaker/Endpoints</code>) are published as the model's execution role, <strong>MLEngineer</strong>.</li>
+<li>Glue's <code>--enable-metrics</code> job metrics (namespace <code>Glue</code>) are published as the job role, <strong>DataEngineer</strong>.</li>
+</ul>
+<p>Add one statement to each policy in <code>infrastructure/modules/iam/main.tf</code>, then <code>terraform apply</code>:</p>
+<pre><code class="language-hcl">      # in the MLEngineer policy's Statement list
+      {
+        Sid      = &quot;EndpointInstanceMetrics&quot;
+        Effect   = &quot;Allow&quot;
+        Action   = [&quot;cloudwatch:PutMetricData&quot;]
+        Resource = &quot;*&quot;
+        Condition = {
+          StringEquals = { &quot;cloudwatch:namespace&quot; = &quot;/aws/sagemaker/Endpoints&quot; }
+        }
+      },
+</code></pre>
+<pre><code class="language-hcl">      # in the DataEngineer policy's Statement list
+      {
+        Sid      = &quot;GlueJobMetrics&quot;
+        Effect   = &quot;Allow&quot;
+        Action   = [&quot;cloudwatch:PutMetricData&quot;]
+        Resource = &quot;*&quot;
+        Condition = {
+          StringEquals = { &quot;cloudwatch:namespace&quot; = &quot;Glue&quot; }
+        }
+      },
+</code></pre>
+<p>The endpoint picks the permission up without a redeploy: on the reference account, CPU and memory metrics appeared about three minutes after the apply. Glue metrics appear from the next job run.</p>
+<p><strong>Before you re-run a Glue job on a stack that already has output</strong>, add two exact keys to the <code>S3DataPrefixesReadWrite</code> resource list in the same DataEngineer policy:</p>
+<pre><code class="language-hcl">          &quot;${local.bucket_arn}/processed_$folder$&quot;,
+          &quot;${local.bucket_arn}/features_$folder$&quot;
+</code></pre>
+<p>Re-running a job that writes with <code>.mode("overwrite")</code> makes Glue write a <code>&lt;parent&gt;_$folder$</code> marker at the bucket root, outside the prefixes Lab 2 granted. Without these keys the re-run fails with <code>AccessDenied</code> naming one of them. That's an IAM gap, not your script. The Lab 2 handout now includes them. A first run on a freshly applied stack doesn't need them.</p>
+<blockquote>
+<p><strong>Added Wed Nov 18, 2026.</strong> Found on the reference run: before these grants, <code>list-metrics</code> returned nothing in either namespace.</p>
+</blockquote>
+<h2 id="tasks">Tasks</h2>
+<h3 id="task-1-five-layer-monitoring-implementation-35-points">Task 1 — Five-Layer Monitoring Implementation (35 points)</h3>
+<p>Implement monitoring across all five layers for the NorthStar churn model. All layers must surface in a single <strong>CloudWatch Dashboard</strong> named <code>NorthStar-AI-Platform</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>What to Monitor</th>
+<th>Tool</th>
+<th>Threshold</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Infrastructure</strong></td>
+<td>SageMaker endpoint CPU, memory</td>
+<td>CloudWatch Metrics</td>
+<td>CPU &gt; 80% → alert</td>
+</tr>
+<tr>
+<td><strong>Pipeline</strong></td>
+<td>Glue job success/failure rate</td>
+<td>CloudWatch Events</td>
+<td>Any failure → P3 alert</td>
+</tr>
+<tr>
+<td><strong>Model</strong></td>
+<td>Data drift (PSI on top 3 features)</td>
+<td>Evidently, run as a processing job</td>
+<td>PSI &gt; 0.2 → alert (metric published by you)</td>
+</tr>
+<tr>
+<td><strong>Application</strong></td>
+<td>Inference latency p50, p95, p99</td>
+<td>CloudWatch Metrics</td>
+<td>p95 &gt; 200 ms → alert (<code>ModelLatency</code> threshold <code>200000</code> — see note)</td>
+</tr>
+<tr>
+<td><strong>Business</strong></td>
+<td>Daily churn alert volume (proxy)</td>
+<td>CloudWatch Custom Metric</td>
+<td>Volume drop &gt;30% vs. 7-day avg → alert</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong><code>ModelLatency</code> is emitted in MICROSECONDS.</strong> Every latency threshold in this lab is written in milliseconds because that is how humans and SLAs talk, but CloudWatch does not. 200 ms is <code>200000</code>; 500 ms is <code>500000</code>. Writing <code>200</code> builds an alarm that trips at 0.2 ms — well below a healthy endpoint's normal latency, measured at roughly <strong>4,100 µs (4.1 ms)</strong> on <code>ml.m5.large</code> in Lab 5. That alarm sits in <code>ALARM</code> permanently and any automation wired to it fires against a healthy system. Verified on AWS 2026-07-30. Check the <code>Unit</code> field in <code>get-metric-statistics</code> output before setting any threshold.</p>
+<p>Related: the <strong>first invocation after a deploy runs ~6x slower</strong> (~24,000 µs measured) as the container warms. An alarm with <code>EvaluationPeriods: 1</code> will trip on your own deployment.</p>
+<p><strong>Requirements:</strong>
+- A <strong>baseline</strong> exported from your Lab 2 training feature set — a CSV of the <strong>11 features the endpoint receives</strong> — uploaded to <code>s3://&lt;bucket&gt;/monitoring/baseline/</code>.
+- A <strong>drift analysis run</strong> — Evidently executed as a processing job against your captured inference data, producing <code>drift_report.json</code> and <code>drift_violations.json</code>. Commit both.
+- At least one custom CloudWatch metric pushed programmatically (business layer)
+- Dashboard JSON exported and committed to <code>monitoring/dashboards/northstar-dashboard.json</code></p>
+</blockquote>
+<p><strong>Running the drift analysis.</strong> The launcher uploads the analysis script, checks that captured data actually exists, and submits the processing job:</p>
+<pre><code class="language-bash">python monitoring/run_evidently_job.py \
+  --bucket northstar-dev-data-&lt;account&gt; \
+  --role-arn arn:aws:iam::&lt;account&gt;:role/northstar-dev-ModelMonitorExecution \
+  --endpoint northstar-churn-prod \
+  --variant champion
+</code></pre>
+<p>The job runs the stock SageMaker scikit-learn container and <code>pip install</code>s Evidently at start-up. Two details in that command are load-bearing:</p>
+<pre><code>683313688378.dkr.ecr.us-east-1.amazonaws.com/sagemaker-scikit-learn:1.4-2-py312-cpu-py3
+pip install evidently==0.7.21
+</code></pre>
+<blockquote>
+<p><strong>The <code>py312</code> tag is required.</strong> Evidently needs <strong>Python ≥ 3.10</strong>. The older <code>sklearn 1.2-1</code> processing image ships an earlier Python and the install fails. If you copy an image URI from an older tutorial, this is what breaks.</p>
+<p><strong>Pin the version.</strong> Evidently's API broke at 0.7 — <code>column_mapping</code> was replaced by <code>DataDefinition</code>, and you can no longer hand a Report a bare DataFrame; it must be wrapped in a <code>Dataset</code>. Most tutorials online predate this and fail with an <code>ImportError</code>. An unpinned install also means your lab breaks the day upstream ships 0.8.</p>
+<p><strong>You do not need a NAT gateway for the <code>pip install</code>.</strong> A processing job launched without a VPC config has egress through SageMaker's managed network. Verified 2026-08-07.</p>
+</blockquote>
+<p><strong>Expect alarming-looking pip output that is not an error.</strong> Installing Evidently upgrades <code>protobuf</code> and <code>urllib3</code> past the versions the sklearn container pins, and pip says so loudly:</p>
+<pre><code>ERROR: pip's dependency resolver does not currently take into account all the
+packages that are installed. This behaviour is the source of the following
+dependency conflicts.
+sagemaker-sklearn-container 2.0 requires protobuf==3.20.2, but you have protobuf 7.35.1
+</code></pre>
+<p><strong>The job succeeds anyway</strong> — nothing in the drift analysis uses those packages. Verified. But note the consequence: <code>botocore</code> inside that container is now on an unsupported <code>urllib3</code>, so <strong>do not try to call <code>put-metric-data</code> from inside the job.</strong> Publish your metric from your laptop after the job returns: read <code>drift_violations.json</code> from S3 and call <code>put-metric-data</code> there. Writing that publisher is part of Task 1.</p>
+<p><strong>Also log each drift run to your MLflow App.</strong> You created it in Lab 3 for training runs; drift belongs there too:</p>
+<pre><code class="language-python">import mlflow
+mlflow.set_tracking_uri(APP_ARN)
+mlflow.set_experiment(&quot;northstar-drift&quot;)
+
+with mlflow.start_run(run_name=f&quot;drift-{job_name}&quot;):
+    mlflow.log_params({&quot;baseline_records&quot;: s[&quot;baseline_records&quot;],
+                       &quot;captured_records&quot;: s[&quot;captured_records&quot;],
+                       &quot;variant&quot;: &quot;champion&quot;})
+    for feat, d in s[&quot;per_feature&quot;].items():
+        mlflow.log_metric(f&quot;{d['method']}_{feat}&quot;, d[&quot;value&quot;])
+    mlflow.log_metric(&quot;violation_count&quot;, s[&quot;violation_count&quot;])
+    mlflow.log_artifact(&quot;drift_report.html&quot;)
+</code></pre>
+<p><strong>Why bother, when the numbers are already in CloudWatch?</strong> Because they answer different questions. CloudWatch tells you <em>what drift is right now</em> and pages someone when it crosses a line. MLflow tells you <em>how drift has moved across runs</em> and lets you put a drift measurement next to the training run of the model that produced it. When you eventually retrain, the question is "has the world moved far enough from what this model was trained on?" — that is a comparison between a drift run and a training run, and only MLflow holds both.</p>
+<p>CloudWatch also expires custom metrics after 15 months and cannot store the HTML report. <code>log_artifact</code> keeps the full Evidently report attached to the run that produced it.</p>
+<p><strong>Capture is partitioned per variant</strong> — <code>datacapture/&lt;endpoint&gt;/&lt;variant&gt;/&lt;yyyy&gt;/&lt;mm&gt;/&lt;dd&gt;/&lt;hh&gt;/</code>. If you ran a two-variant canary in Lab 5, point the job at one variant's prefix, and say in your write-up which one and why.</p>
+<p>Reference run, verified 2026-08-07 on <code>ml.t3.medium</code>: 10,000 baseline rows against 800 captured records, <strong>1 min 59 s</strong> billed. Output:</p>
+<pre><code>feature                      test         value   thresh  drift
+days_since_last_purchase     psi         0.0227      0.2    no
+purchase_frequency_30d       psi         6.8354      0.2   YES
+avg_order_value              psi         1.3880      0.2   YES
+category_diversity_score     ks          0.8945     0.05    no
+total_spend_90d              ks          0.7629     0.05    no
+</code></pre>
+<p>Your numbers will differ; the <em>shape</em> of the output should not.</p>
+<blockquote>
+<p><strong>The one thing most likely to make your results silently wrong.</strong></p>
+<p><strong>Evidently returns a different kind of number depending on the test.</strong> PSI returns a <strong>distance statistic</strong> — it <em>rises</em> with drift, so drift means <code>value &gt; threshold</code>. KS returns a <strong>p-value</strong> — it <em>falls</em> with drift, so drift means <code>value &lt; threshold</code>. Measured on synthetic data as the mean shift increases:</p>
+<table>
+<thead>
+<tr>
+<th>mean shift</th>
+<th><code>ks</code> (p-value)</th>
+<th><code>psi</code> (statistic)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>0.272552</td>
+<td>0.0235</td>
+</tr>
+<tr>
+<td>2</td>
+<td>0.000000</td>
+<td>0.0472</td>
+</tr>
+<tr>
+<td>5</td>
+<td>0.000000</td>
+<td>0.2757</td>
+</tr>
+<tr>
+<td>15</td>
+<td>0.000000</td>
+<td>2.3176</td>
+</tr>
+</tbody>
+</table>
+<p>They move in <strong>opposite directions.</strong> If you loop over mixed tests with one <code>if value &gt; threshold</code>, KS is inverted and reports <strong>no drift on maximally drifted data</strong>, because <code>0.0</code> is not greater than <code>0.05</code>. Nothing errors. Your report looks clean. This is the single most dangerous defect available in this lab, and it is a reasoning error, not an infrastructure one — no amount of AWS debugging will find it.</p>
+<p><strong>Two more that will cost you a run:</strong></p>
+<p><strong>1. Baseline the 11 features the <em>endpoint</em> receives</strong> — not the full training frame. <code>churn_label</code> is the target and <code>churn_risk_score</code> is the Lab 3 recency baseline; neither is a model input. A baseline over 12 or 13 columns produces schema noise that never names its real cause.</p>
+<p><strong>2. Do not invoke with batched rows if you intend to monitor the traffic.</strong> Send more than one CSV row per request and the whole payload is captured as a single string, so 200 batched predictions become one row in your comparison window. Score one row per request.</p>
+<p><strong>3. Use at least ~500 predictions in the comparison window.</strong> A small window manufactures drift that is not there. The analysis script warns you when the window is under 500 rather than letting you believe a false positive.</p>
+</blockquote>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All 5 layers visible in CloudWatch Dashboard</td>
+<td>15</td>
+<td>TA can open the dashboard and see at least one metric per layer</td>
+</tr>
+<tr>
+<td>Evidently baseline <strong>and</strong> drift analysis run</td>
+<td>10</td>
+<td>A committed baseline CSV over the 11 endpoint features, <strong>and</strong> <code>drift_report.json</code> + <code>drift_violations.json</code> from an Evidently processing job over captured data. A Model Monitor schedule is NOT required and cannot be created — see the note above.</td>
+</tr>
+<tr>
+<td>Custom metric pushed for business layer</td>
+<td>5</td>
+<td><code>aws cloudwatch get-metric-statistics</code> returns data for the custom metric</td>
+</tr>
+<tr>
+<td>Dashboard JSON committed</td>
+<td>5</td>
+<td><code>monitoring/dashboards/northstar-dashboard.json</code> is valid CloudWatch Dashboard JSON</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Grading standard carried forward from Lab 5:</strong> prefer <em>observed</em> evidence over configuration screenshots. A <code>drift_violations.json</code> with real numbers in it beats a console screenshot of a job that has never executed.</p>
+</blockquote>
+<h3 id="task-2-drift-detection-plan-15-points">Task 2 — Drift Detection Plan (15 points)</h3>
+<p>Write a drift detection plan for the NorthStar churn model in <code>docs/lab6-runbook.md</code>.</p>
+<p><strong>Required content:</strong>
+1. <strong>Drift types most likely for this domain</strong>: Which of (data drift, concept drift, model degradation) are most likely for customer churn prediction in retail? Justify with reference to NorthStar's business context (seasonal promotions, catalog changes, economic shifts).
+2. <strong>Statistical tests chosen</strong>: For each feature you monitor, specify the test (PSI, KS, or JSD), the baseline window, and the threshold.
+3. <strong>Concept drift detection</strong>: The churn label is only observable after the full 90-day holdout window has elapsed, so ground truth for a prediction made today does not exist until three months from now. How will you detect concept drift in the meantime? Propose a proxy signal and state its lag.</p>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Drift type analysis references NorthStar specifics</td>
+<td>5</td>
+<td>Mentions at least one NorthStar-specific driver (e.g., holiday promotions, catalog refresh)</td>
+</tr>
+<tr>
+<td>Statistical test specified per feature with threshold</td>
+<td>5</td>
+<td>At least 3 features have named tests and numeric thresholds</td>
+</tr>
+<tr>
+<td>Concept drift proxy proposed and reasoned</td>
+<td>5</td>
+<td>Proposes a specific observable signal (e.g., model score distribution shift, early return rate)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-3-alert-architecture-15-points">Task 3 — Alert Architecture (15 points)</h3>
+<p>Define the full alert set for the NorthStar churn model and offer generation system in <code>monitoring/alerts/</code>.</p>
+<p><strong>Required deliverable:</strong> An alert specification document or CloudWatch Alarms Terraform config covering:</p>
+<ul>
+<li>At least <strong>6 alerts</strong> with assigned P1–P4 severity tiers</li>
+<li>Escalation path for each tier (P1: wake on-call + page manager; P2: on-call; P3: Slack + ticket; P4: ticket only)</li>
+<li>At least <strong>1 suppression rule</strong> for a realistic alert-storm scenario (e.g., "suppress P3 model drift alerts during scheduled retraining window")</li>
+</ul>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>≥6 alerts with severity tiers</td>
+<td>8</td>
+<td>All 6 alerts have P-tier assigned; distribution across P1–P4 is reasonable</td>
+</tr>
+<tr>
+<td>Escalation paths documented</td>
+<td>4</td>
+<td>Each severity tier has a named escalation action</td>
+</tr>
+<tr>
+<td>≥1 suppression rule</td>
+<td>3</td>
+<td>Suppression rule names the condition and the alerts it suppresses</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-4-slo-design-15-points">Task 4 — SLO Design (15 points)</h3>
+<p>Define SLOs for the NorthStar churn prediction model in <code>docs/lab6-runbook.md</code>.</p>
+<p><strong>Required SLOs</strong> (all four):</p>
+<table>
+<thead>
+<tr>
+<th>SLO</th>
+<th>Target</th>
+<th>SLI (Good Events / Total Events)</th>
+<th>Error Budget</th>
+<th>Deployment Freeze Trigger</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Availability</td>
+<td>99.5%</td>
+<td>Successful predictions / total requests</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Latency (p95)</td>
+<td><strong>&lt; 20 ms</strong> (<code>ModelLatency</code> ≤ <code>20000</code>)</td>
+<td>Requests completing &lt; 20 ms / total requests</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Prediction Quality</td>
+<td>Recall@10% ≥ 0.25 on weekly sample</td>
+<td>Weekly sample passing threshold / total weekly samples</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Fairness</td>
+<td>Recall gap across loyalty tiers ≤ 10pp</td>
+<td>Weeks within fairness threshold / total weeks</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Fill in the Error Budget (in minutes/month or events/month) and the Deployment Freeze Trigger for each SLO.</p>
+<blockquote>
+<p><strong>Why the prediction-quality target is 0.25 and not something rounder.</strong> With roughly 22% positives in the population, scoring only the top 10% caps achievable recall near <strong>0.45</strong> — you cannot retrieve more churners than fit in the decile you are allowed to contact. The Lab 3 reference model achieves <strong>0.3106</strong> (<code>train_reference.py</code>, measured 2026-08-02, registry v4), and Lab 4's promotion gate is <strong>≥ 0.25</strong>. Setting the SLO above the gate that let the model ship would put it in breach on the day it launched. An SLO your system fails at launch is not a target; it is a broken alarm you will learn to ignore.</p>
+<p><strong>Why the latency SLO is 20 ms while the Task 1 alert fires at 200 ms.</strong> These are different numbers doing different jobs, and conflating them is the most common SLO mistake in industry. An <strong>SLO</strong> is a promise measured over a month and spent down as an error budget. An <strong>alert threshold</strong> is the point at which you wake a human. Measured steady-state p95 on this endpoint is ~4.15 ms, so a 200 ms SLO would be met 48x over — free, unbreachable, and it would teach you nothing. At 20 ms you keep a healthy ~5x margin, but the ~24,000 µs cold start on every deployment <em>does</em> breach it. That is the intended lesson: your own deploys consume your error budget, which is precisely why error budgets govern deployment freezes.</p>
+</blockquote>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All 4 SLOs complete with error budgets</td>
+<td>10</td>
+<td>Each row has a numeric error budget</td>
+</tr>
+<tr>
+<td>Deployment freeze triggers are actionable</td>
+<td>5</td>
+<td>Each trigger is a specific condition (not "if SLO is at risk")</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-5-runbooks-20-points">Task 5 — Runbooks (20 points)</h3>
+<p>Write complete runbooks for <strong>two</strong> failure scenarios in <code>docs/lab6-runbook.md</code>. Choose from:
+- A: Data drift detected (PSI &gt; 0.2 on <code>days_since_last_purchase</code>)
+- B: Inference latency spike (p95 &gt; 500 ms — <code>ModelLatency</code> &gt; <code>500000</code> — for &gt; 5 minutes)
+- C: Feature Store unavailable (online store read failures)
+- D: Fairness guardrail breach (recall gap exceeds 10pp between loyalty tiers)</p>
+<p><strong>Each runbook must follow this structure:</strong></p>
+<pre><code class="language-markdown">## Runbook: [Failure Mode Name]
+
+### Detection
+- Alert name and threshold that triggers this runbook
+- Secondary signals that confirm the failure
+
+### Triage (&lt; 5 minutes)
+- Step 1: [specific action]
+- Step 2: [specific action]
+
+### Containment Options
+- Option A: [what it does, when to choose it]
+- Option B: [what it does, when to choose it — e.g., graceful degradation fallback]
+
+### Escalation
+- Trigger for escalating beyond on-call: [specific condition]
+- Who is paged: [role, not person]
+- SLA for response: [minutes]
+
+### Resolution Verification
+- How do you confirm the issue is resolved?
+- What metric must return to normal range?
+
+### Post-Incident Actions
+- Within 24 hours: [specific action]
+- Postmortem required: [yes/no — state the condition that requires one]
+</code></pre>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Both runbooks complete with all sections</td>
+<td>10</td>
+<td>No section is "TBD" or empty</td>
+</tr>
+<tr>
+<td>Containment options include a graceful degradation fallback</td>
+<td>6</td>
+<td>At least one option describes what the system does when it cannot recover immediately</td>
+</tr>
+<tr>
+<td>Resolution verification is observable</td>
+<td>4</td>
+<td>Names a specific metric or CloudWatch alarm state, not "the system feels normal"</td>
+</tr>
+</tbody>
+</table>
+<h2 id="traps-already-mapped-do-not-rediscover">Traps Already Mapped — do not rediscover</h2>
+<p>These cost previous runs of this course real time and real money. They are not hypothetical.</p>
+<ol>
+<li><strong>PSI and KS move in opposite directions.</strong> PSI is a statistic (drift when <code>&gt;</code> threshold); Evidently reports KS as a p-value (drift when <code>&lt;</code> threshold). One comparison operator cannot serve both, and getting it wrong reports <em>no drift on maximally drifted data</em> without erroring. Verified 2026-08-07.</li>
+<li><strong>Processing-job quota defaults to 0 for every non-burstable instance.</strong> Not low — zero. Only <code>ml.t3.{medium,large,xlarge}</code> have a non-zero default. Endpoint, training and processing quotas are three separate numbers per instance type; one being fine says nothing about the others. <code>ml.t3.medium</code> is sufficient for Evidently. Verified 2026-07-31.</li>
+<li><strong><code>ModelLatency</code> is in microseconds.</strong> 200 ms is <code>200000</code>. Every latency threshold in this lab depends on this. Verified both directions on AWS: <code>200000</code> stayed <code>OK</code>, <code>1000</code> alarmed in under a minute.</li>
+<li><strong>Cold start is ~6x steady-state latency</strong> (~24,000 µs vs ~4,150 µs). An alarm with <code>EvaluationPeriods: 1</code> trips on your own deployment.</li>
+<li><strong>Endpoint configs are immutable.</strong> Data capture cannot be added to a running endpoint; you must roll a new config.</li>
+<li><strong>Endpoints bill hourly until deleted.</strong> Rolling back to weight 0 does not stop the charge.</li>
+<li><strong>Any timer you build outlives your endpoint.</strong> SageMaker monitoring schedules are closed to you, but an EventBridge rule or cron loop you write yourself has exactly the same failure mode: it keeps launching billable processing jobs after the endpoint is gone. If you automate the drift run, delete the trigger explicitly.</li>
+<li><strong>Burstable instances cannot be auto-scaling targets</strong> (carried from Lab 5).</li>
+<li><strong>IAM propagation lag ~30 s</strong> — re-running immediately shows the <em>old</em> error and looks like your fix failed.</li>
+<li><strong>Non-ASCII in AWS-facing <code>description</code> fields</strong> — some services reject em dashes, others accept them, so failures look arbitrary.</li>
+<li><strong>Console Resource Explorer lags hours.</strong> Verify against the live API.</li>
+<li><strong>Auto-scaling does NOT orphan scalable targets</strong> on endpoint deletion. Verified. Do not "fix" this non-problem.</li>
+<li><strong>Your own test traffic is in the capture.</strong> <code>canary_deploy_realtime.py</code> checks the 90/10 split by sending <code>sample.csv</code> 200 times, so about 181 copies of one row land in the champion window. On clean traffic that alone produced KS p = 0.0000 on two features. The kit's <code>load_capture</code> drops byte-identical payloads and prints how many; read that line. Verified 2026-11-18.</li>
+<li><strong>Glue task metrics miss driver failures.</strong> A transform run that died on an S3 AccessDenied reported <code>numFailedTasks</code> = 0. Alarm on the job's state-change event (EventBridge, <code>Glue Job State Change</code>, state <code>FAILED</code>/<code>ERROR</code>/<code>TIMEOUT</code>), which is what the Task 1 table means by CloudWatch Events. Verified 2026-11-18.</li>
+<li><strong>No metrics is not the same as healthy.</strong> An empty <code>/aws/sagemaker/Endpoints</code> or <code>Glue</code> namespace means a missing permission (Prerequisite 3), not an idle system. Verified 2026-11-18.</li>
+</ol>
+<h2 id="teardown-required-read-before-you-submit">Teardown (required — read before you submit)</h2>
+<p><strong>Teardown is a gate, not a rubric line.</strong> An endpoint or drift-automation trigger still running after the deadline is a <strong>10-point deduction</strong>, applied on top of the gate.</p>
+<pre><code class="language-bash">bash scripts/teardown-lab6.sh
+</code></pre>
+<p>Order matters. Stop <strong>any timer or in-flight processing job first</strong>, then delete the endpoint. Anything on a schedule keeps launching processing jobs that bill on their own instances, and it will happily do so long after the endpoint it was pointed at is gone.</p>
+<p>Teardown must remove, at minimum:
+- Any EventBridge rule or cron trigger you built to automate the drift run
+- In-flight processing jobs
+- The endpoint, endpoint config, and both SageMaker Models
+- CloudWatch alarms created for Task 1 and Task 3
+- Any scaling target left from Lab 5</p>
+<p>Then confirm with an independent all-region sweep, as in Labs 2–5. Custom CloudWatch metrics cannot be deleted — they expire after 15 months of no data. That is expected; the $0.30 metric-month charge is already accounted for.</p>
+</body></html>

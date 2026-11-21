@@ -130,6 +130,15 @@ resource "aws_iam_policy" "ml_engineer" {
           "sagemaker:BatchGetRecord"
         ],
         "Resource" : "*"
+      },
+      {
+        "Sid" : "EndpointInstanceMetrics",
+        "Effect" : "Allow",
+        "Action" : ["cloudwatch:PutMetricData"],
+        "Resource" : "*",
+        "Condition" : {
+          "StringEquals" : { "cloudwatch:namespace" : "/aws/sagemaker/Endpoints" }
+        }
       }
     ]
   })
@@ -211,6 +220,7 @@ resource "aws_iam_policy" "data_engineer" {
           "arn:aws:s3:::${var.project}-${var.environment}-data-*/raw/*",
           "arn:aws:s3:::${var.project}-${var.environment}-data-*/processed/*",
           "arn:aws:s3:::${var.project}-${var.environment}-data-*/features/*",
+          "arn:aws:s3:::${var.project}-${var.environment}-data-*/processed_$folder$",
           "arn:aws:s3:::${var.project}-${var.environment}-data-*/features_$folder$"
         ]
       },
@@ -245,6 +255,15 @@ resource "aws_iam_policy" "data_engineer" {
           "logs:PutLogEvents"
         ],
         "Resource" : "*"
+      },
+      {
+        "Sid" : "GlueJobMetrics",
+        "Effect" : "Allow",
+        "Action" : ["cloudwatch:PutMetricData"],
+        "Resource" : "*",
+        "Condition" : {
+          "StringEquals" : { "cloudwatch:namespace" : "Glue" }
+        }
       }
     ]
   })
@@ -334,4 +353,75 @@ resource "aws_iam_policy" "model_monitor" {
 resource "aws_iam_role_policy_attachment" "model_monitor" {
   role       = aws_iam_role.model_monitor.name
   policy_arn = aws_iam_policy.model_monitor.arn
+}
+
+# ── ModelMonitorExecution (Lab 6) ────────────────────────────────────────────
+# Execution identity for the Evidently drift processing job. ModelMonitor above
+# is the read-only observer; this role pulls the container and writes reports.
+resource "aws_iam_role" "model_monitor_execution" {
+  name               = "${var.project}-${var.environment}-ModelMonitorExecution"
+  assume_role_policy = data.aws_iam_policy_document.sagemaker_trust.json
+
+  tags = {
+    Name = "${var.project}-${var.environment}-ModelMonitorExecution"
+  }
+}
+
+resource "aws_iam_policy" "model_monitor_execution" {
+  name        = "${var.project}-${var.environment}-ModelMonitorExecutionPolicy"
+  description = "Evidently drift job: pull the sklearn image, read datacapture and monitoring, write monitoring reports"
+
+  policy = jsonencode({
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Sid" : "ECRPullProcessingImage",
+        "Effect" : "Allow",
+        "Action" : [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage"
+        ],
+        "Resource" : "*"
+      },
+      {
+        "Sid" : "S3BucketList",
+        "Effect" : "Allow",
+        "Action" : ["s3:ListBucket", "s3:GetBucketLocation"],
+        "Resource" : "arn:aws:s3:::${var.project}-${var.environment}-data-*"
+      },
+      {
+        "Sid" : "ReadCaptureBaselineAndCode",
+        "Effect" : "Allow",
+        "Action" : ["s3:GetObject"],
+        "Resource" : [
+          "arn:aws:s3:::${var.project}-${var.environment}-data-*/datacapture/*",
+          "arn:aws:s3:::${var.project}-${var.environment}-data-*/monitoring/*"
+        ]
+      },
+      {
+        "Sid" : "WriteMonitoringReports",
+        "Effect" : "Allow",
+        "Action" : ["s3:PutObject", "s3:AbortMultipartUpload"],
+        "Resource" : "arn:aws:s3:::${var.project}-${var.environment}-data-*/monitoring/*"
+      },
+      {
+        "Sid" : "CloudWatchLogs",
+        "Effect" : "Allow",
+        "Action" : [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogStreams"
+        ],
+        "Resource" : "arn:aws:logs:*:*:log-group:/aws/sagemaker/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "model_monitor_execution" {
+  role       = aws_iam_role.model_monitor_execution.name
+  policy_arn = aws_iam_policy.model_monitor_execution.arn
 }

@@ -12,3 +12,8 @@ output "model_monitor_role_arn" {
   description = "ARN of the ModelMonitor role"
   value       = aws_iam_role.model_monitor.arn
 }
+
+output "model_monitor_execution_role_arn" {
+  description = "ARN of the ModelMonitorExecution role - the Evidently processing job runs as this (Lab 6)"
+  value       = aws_iam_role.model_monitor_execution.arn
+}
