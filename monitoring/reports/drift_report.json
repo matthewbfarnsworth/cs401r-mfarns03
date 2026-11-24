@@ -34,15 +34,15 @@
       "value": 0.0478347964265181
     },
     {
-      "id": "2942d9777781f4e61b9026a5f3a0ad4e",
-      "metric_name": "ValueDrift(column=category_diversity_score,method=ks,threshold=0.05)",
+      "id": "6dfd530053df5d3bc9e1257632757269",
+      "metric_name": "ValueDrift(column=category_diversity_score,method=psi,threshold=0.2)",
       "config": {
         "type": "evidently:metric_v2:ValueDrift",
         "column": "category_diversity_score",
-        "method": "ks",
-        "threshold": 0.05
+        "method": "psi",
+        "threshold": 0.2
       },
-      "value": 0.17965148499635977
+      "value": 0.01813849217723943
     },
     {
       "id": "4e019117243bf940f5ef557466a0a517",

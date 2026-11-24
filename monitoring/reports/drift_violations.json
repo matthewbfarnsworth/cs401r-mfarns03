@@ -26,9 +26,9 @@
       "drifted": false
     },
     "category_diversity_score": {
-      "method": "ks",
-      "threshold": 0.05,
-      "value": 0.17965148499635977,
+      "method": "psi",
+      "threshold": 0.2,
+      "value": 0.01813849217723943,
       "drifted": false
     },
     "total_spend_90d": {

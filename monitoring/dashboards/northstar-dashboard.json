@@ -156,19 +156,6 @@
                         "EndpointName",
                         "northstar-churn-prod",
                         "Feature",
-                        "category_diversity_score",
-                        {
-                            "label": "DriftKSPValue category_diversity_score",
-                            "stat": "Maximum",
-                            "yAxis": "right"
-                        }
-                    ],
-                    [
-                        "NorthStar/ChurnModel",
-                        "DriftKSPValue",
-                        "EndpointName",
-                        "northstar-churn-prod",
-                        "Feature",
                         "total_spend_90d",
                         {
                             "label": "DriftKSPValue total_spend_90d",
@@ -211,6 +198,19 @@
                         "avg_order_value",
                         {
                             "label": "DriftPSI avg_order_value",
+                            "stat": "Maximum",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "NorthStar/ChurnModel",
+                        "DriftPSI",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "Feature",
+                        "category_diversity_score",
+                        {
+                            "label": "DriftPSI category_diversity_score",
                             "stat": "Maximum",
                             "yAxis": "right"
                         }

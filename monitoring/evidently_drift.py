@@ -87,7 +87,7 @@ DRIFT_PLAN = {
     "days_since_last_purchase": ("psi", 0.2),
     "purchase_frequency_30d":   ("psi", 0.2),
     "avg_order_value":          ("psi", 0.2),
-    "category_diversity_score": ("ks", 0.05),
+    "category_diversity_score": ("psi", 0.2),  # 8 discrete levels: KS p-values are inexact on ties
     "total_spend_90d":          ("ks", 0.05),
 }
 

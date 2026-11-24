@@ -43,7 +43,7 @@ variable "drift_features" {
   description = "Features in DRIFT_PLAN, by the per-feature metric publish_metrics.py writes for them"
   type        = map(list(string))
   default = {
-    DriftPSI      = ["days_since_last_purchase", "purchase_frequency_30d", "avg_order_value"]
-    DriftKSPValue = ["category_diversity_score", "total_spend_90d"]
+    DriftPSI      = ["days_since_last_purchase", "purchase_frequency_30d", "avg_order_value", "category_diversity_score"]
+    DriftKSPValue = ["total_spend_90d"]
   }
 }
