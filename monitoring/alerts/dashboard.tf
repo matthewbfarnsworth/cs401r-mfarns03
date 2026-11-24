@@ -88,13 +88,18 @@ resource "aws_cloudwatch_dashboard" "platform" {
         width  = 12
         height = 7
         properties = {
-          title = "Alarm status"
+          title = "Alarm status (P1 to P4; Glue failures are EventBridge events, see widget 4)"
           alarms = [
-            aws_cloudwatch_metric_alarm.cpu_p90_high.arn,
-            aws_cloudwatch_metric_alarm.latency_p95_high.arn,
-            aws_cloudwatch_metric_alarm.drift_detected.arn,
+            aws_cloudwatch_metric_alarm.error_rate_high.arn,
+            aws_cloudwatch_composite_alarm.serving_p2.arn,
+            aws_cloudwatch_metric_alarm.latency_p95_critical.arn,
             aws_cloudwatch_metric_alarm.alert_volume_drop.arn,
+            aws_cloudwatch_composite_alarm.serving_p3.arn,
+            aws_cloudwatch_metric_alarm.latency_p95_high.arn,
+            aws_cloudwatch_metric_alarm.cpu_p90_high.arn,
+            aws_cloudwatch_metric_alarm.drift_detected.arn,
             aws_cloudwatch_metric_alarm.rollback_latency.arn,
+            aws_cloudwatch_composite_alarm.serving_suppressor.arn,
           ]
         }
       }],

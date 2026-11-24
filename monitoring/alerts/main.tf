@@ -73,7 +73,8 @@ resource "aws_sns_topic_policy" "alerts" {
 # reliable signal: it fires once per run that ends in a failure state.
 resource "aws_cloudwatch_event_rule" "glue_job_failed" {
   name        = "${var.project}-glue-job-failed"
-  description = "A NorthStar Glue job run ended FAILED, ERROR or TIMEOUT"
+  description = "P2 Pipeline: a NorthStar Glue job run ended FAILED, ERROR or TIMEOUT"
+  tags        = { Severity = "P2", Layer = "pipeline" }
 
   event_pattern = jsonencode({
     source        = ["aws.glue"]
@@ -98,6 +99,6 @@ resource "aws_cloudwatch_event_target" "glue_job_failed_sns" {
       msg   = "$.detail.message"
       time  = "$.time"
     }
-    input_template = "\"Glue job <job> run <run> ended <state> at <time>: <msg>\""
+    input_template = "\"P2 NorthStar pipeline: Glue job <job> run <run> ended <state> at <time>: <msg>\""
   }
 }

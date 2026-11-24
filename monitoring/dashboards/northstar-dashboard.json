@@ -353,13 +353,18 @@
             "height": 7,
             "properties": {
                 "alarms": [
-                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-cpu-p90-high",
-                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-latency-p95-high",
-                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-drift-detected",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-5xx-error-rate-high",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-serving-p2",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-latency-p95-critical",
                     "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-alert-volume-drop",
-                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-rollback-latency"
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-serving-p3",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-latency-p95-high",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-cpu-p90-high",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-drift-detected",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-rollback-latency",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-serving-suppressor"
                 ],
-                "title": "Alarm status"
+                "title": "Alarm status (P1 to P4; Glue failures are EventBridge events, see widget 4)"
             },
             "type": "alarm",
             "width": 12,

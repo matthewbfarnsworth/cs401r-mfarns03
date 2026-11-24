@@ -106,6 +106,35 @@ PRODUCTION_MONITOR_WINDOW_HOURS = 48
 LAB_MONITOR_WINDOW_MINUTES = 60
 
 
+# Lab 6 Task 3 suppression signal. While an endpoint is being created or
+# updated, publish DeploymentInProgress = 1 about every 30 s. The alarm
+# northstar-churn-deployment-in-progress reads it, and the serving composite
+# alarms use that alarm to hold back latency and CPU notifications caused by
+# the deployment itself (cold start, instance replacement). When publishing
+# stops, the alarm returns to OK on its own once CloudWatch treats the missing
+# data as not breaching (several minutes), so a crashed deploy cannot leave
+# alerts suppressed.
+DEPLOY_SIGNAL_NAMESPACE = "NorthStar/ChurnModel"
+DEPLOY_SIGNAL_METRIC = "DeploymentInProgress"
+_deploy_signal_cw = None
+
+
+def mark_deployment_in_progress() -> None:
+    """Publish one DeploymentInProgress heartbeat. Never fails the deploy."""
+    global _deploy_signal_cw
+    try:
+        if _deploy_signal_cw is None:
+            _deploy_signal_cw = boto3.client("cloudwatch", region_name=REGION)
+        _deploy_signal_cw.put_metric_data(
+            Namespace=DEPLOY_SIGNAL_NAMESPACE,
+            MetricData=[{"MetricName": DEPLOY_SIGNAL_METRIC, "Value": 1.0, "Unit": "Count",
+                         "Dimensions": [{"Name": "EndpointName", "Value": ENDPOINT_NAME}]}],
+        )
+    except Exception as exc:  # noqa: BLE001 - alert suppression must not block a deploy
+        logger.warning("could not publish %s (alerts will not be suppressed): %s",
+                       DEPLOY_SIGNAL_METRIC, exc)
+
+
 def create_models(sm, model_package_arn: str, role_arn: str) -> None:
     """Create the two SageMaker Models the canary endpoint routes between.
 
@@ -179,6 +208,7 @@ def deploy_canary(sm, config_name: str, data_capture_s3_uri: str,
     )
     logger.info("created endpoint config %s", config_name)
 
+    mark_deployment_in_progress()
     existing = [e["EndpointName"] for e in sm.list_endpoints()["Endpoints"]]
     if ENDPOINT_NAME in existing:
         sm.update_endpoint(EndpointName=ENDPOINT_NAME, EndpointConfigName=config_name)
@@ -196,6 +226,7 @@ def deploy_canary(sm, config_name: str, data_capture_s3_uri: str,
         if status == "Failed":
             reason = sm.describe_endpoint(EndpointName=ENDPOINT_NAME).get("FailureReason")
             raise RuntimeError(f"endpoint failed: {reason}")
+        mark_deployment_in_progress()
         time.sleep(30)
 
 
@@ -272,6 +303,7 @@ def shift_weights(sm, champion: int, canary: int) -> None:
     The endpoint reports Updating throughout and keeps serving. Verified: zero
     dropped requests across the transition.
     """
+    mark_deployment_in_progress()
     sm.update_endpoint_weights_and_capacities(
         EndpointName=ENDPOINT_NAME,
         DesiredWeightsAndCapacities=[
@@ -280,6 +312,7 @@ def shift_weights(sm, champion: int, canary: int) -> None:
         ],
     )
     while sm.describe_endpoint(EndpointName=ENDPOINT_NAME)["EndpointStatus"] != "InService":
+        mark_deployment_in_progress()
         time.sleep(15)
     logger.info("weights now champion=%d canary=%d", champion, canary)
 

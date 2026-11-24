@@ -105,6 +105,23 @@ done
 
 # ── 5. CloudWatch alarms ──────────────────────────────────────────────────────
 step "5 - CloudWatch alarms"
+# Composite alarms first. describe-alarms returns them under CompositeAlarms,
+# not MetricAlarms, so the metric-alarm query below never sees them, and a
+# composite left behind keeps referencing alarms that no longer exist.
+COMPOSITES=$(aws cloudwatch describe-alarms --region "${REGION}" --alarm-types CompositeAlarm \
+  --query 'CompositeAlarms[?contains(AlarmName,`northstar`)].AlarmName' \
+  --output text 2>/dev/null)
+if [ -z "${COMPOSITES}" ]; then
+  ok "no composite alarms found"
+else
+  # shellcheck disable=SC2086
+  aws cloudwatch delete-alarms --alarm-names ${COMPOSITES} --region "${REGION}" 2>/dev/null \
+    && ok "deleted composite: ${COMPOSITES}"
+  LEFT=$(aws cloudwatch describe-alarms --region "${REGION}" --alarm-types CompositeAlarm \
+    --query 'length(CompositeAlarms[?contains(AlarmName,`northstar`)])' --output text 2>/dev/null)
+  [ "${LEFT:-0}" = "0" ] || echo "  composite alarms still present: ${LEFT}. Delete them before continuing."
+fi
+
 ALARMS=$(aws cloudwatch describe-alarms --region "${REGION}" \
   --query 'MetricAlarms[?contains(AlarmName,`northstar`) || starts_with(AlarmName,`TargetTracking`)].AlarmName' \
   --output text 2>/dev/null)
