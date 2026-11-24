@@ -21,14 +21,16 @@ Server errors are P1 because they are the only alert where predictions are not b
 
 ## Escalation per tier
 
-| Tier | Escalation action |
-|---|---|
-| P1 | Wake the on-call engineer and page the engineering manager. |
-| P2 | Page the on-call engineer. |
-| P3 | Post to the team Slack channel and open a ticket. |
-| P4 | Open a ticket only. |
+| Tier | Escalation action | Response SLA |
+|---|---|---|
+| P1 | Wake the on-call engineer and page the engineering manager. | Acknowledged within 15 minutes, at any hour. |
+| P2 | Page the on-call engineer. | Acknowledged within 30 minutes, at any hour. |
+| P3 | Post to the team Slack channel and open a ticket. | Picked up within 240 minutes during working hours. |
+| P4 | Open a ticket only. | Triaged by the end of the next business day. |
 
-All alerts publish to the SNS topic `northstar-ml-alerts`. Each alarm's description begins with its tier, and the Glue failure message begins with `P2`, so the paging, Slack and ticketing integrations subscribed to that topic route each notification by the tier at the start of the message. Each alarm also carries its tier in a `Severity` tag. The canary rollback alarm is the exception: it has no notification action, and the P4 ticket is opened when the deploy script reports a rollback.
+When a runbook escalates an incident beyond the on-call engineer, the incident moves up one tier and takes that tier's response SLA. The runbook names the additional role that is paged at that tier.
+
+All alerts publish to the SNS topic `northstar-ml-alerts`. Each alert's description begins with its tier, and the Glue failure message begins with `P2`, so the paging, Slack and ticketing integrations subscribed to that topic route each notification by the tier at the start of the message. Each alarm also carries its tier in a `Severity` tag. The canary rollback alarm is the exception. It has no notification action, no `Severity` tag and no tier at the start of its description, because its definition is kept exactly as the deploy script creates it, and the P4 ticket is opened when the deploy script reports a rollback. Two alarms in `suppression.tf`, `northstar-churn-deployment-in-progress` and `northstar-churn-serving-suppressor`, are not alerts. They send no notifications and have no tier, because they exist only to drive the suppression rule.
 
 ## Suppression rule
 
@@ -39,3 +41,7 @@ Both conditions produce an alert storm that adds nothing. A deployment causes co
 The rule is implemented with CloudWatch composite alarms in `suppression.tf`. The latency and CPU alarms have no actions of their own. Instead, `northstar-churn-serving-p2` (alert 2) and `northstar-churn-serving-p3` (alerts 5 and 6) send their notifications. Both composites name `northstar-churn-serving-suppressor` as their actions suppressor. That composite is in ALARM when either `northstar-churn-deployment-in-progress` or `northstar-churn-5xx-error-rate-high` is in ALARM. The deployment signal comes from `deployment/configs/canary_deploy_realtime.py`, which publishes `DeploymentInProgress = 1` to `NorthStar/ChurnModel` roughly every 30 seconds while it creates or updates the endpoint. When publishing stops, CloudWatch waits several minutes for late data and then treats the missing data as not breaching, so the deployment alarm returns to OK on its own (about 7 minutes after the last heartbeat in testing) and a crashed deployment cannot leave alerts suppressed indefinitely.
 
 When a serving composite goes into ALARM, it waits up to 5 minutes for the suppressor, which is one evaluation period of the error-rate alarm, so an outage that begins together with a latency spike still suppresses it. The cost is that every P2 and P3 serving notification is sent 5 minutes after the composite enters ALARM, and a composite that returns to OK within those 5 minutes sends nothing. After the suppressor clears, suppression continues for another 10 minutes, which is two 5-minute periods, so the first window after a deployment, which still contains cold-start requests, does not notify. The suppressed alarms keep changing state and stay visible on the NorthStar-AI-Platform dashboard. Only their notifications are held back.
+
+## Observer and execution identities
+
+The platform has two monitoring roles, and they are deliberately different. `northstar-dev-ModelMonitor` is the observer identity. It is read-only, with no S3 write access and no ECR pull, and it is meant for the people and automation that watch dashboards, alarms and reports. `northstar-dev-ModelMonitorExecution` is the execution identity. The Evidently drift job runs as this role because it must pull its container from ECR, read the capture and baseline, and write `drift_report.json` and `drift_violations.json` under `monitoring/`. If the drift job is given the observer role instead, it fails several minutes in with an opaque `Failed` status. Keeping the roles separate means that watching the platform never grants the ability to change what the alerts are based on.

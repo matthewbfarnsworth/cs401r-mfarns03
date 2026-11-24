@@ -332,7 +332,7 @@
                         "EndpointName",
                         "northstar-churn-prod",
                         {
-                            "label": "Change vs prior-day mean (%)",
+                            "label": "Change vs prior 7-day mean (%)",
                             "stat": "Maximum",
                             "yAxis": "right"
                         }

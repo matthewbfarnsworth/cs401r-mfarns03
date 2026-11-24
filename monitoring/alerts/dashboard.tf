@@ -49,7 +49,7 @@ locals {
   business_metrics = [
     [local.ns, "ChurnAlertVolume", "EndpointName", local.ep, { stat = "Maximum", label = "Churn alerts per day" }],
     [local.ns, "ChurnAlertVolumeChangePct", "EndpointName", local.ep,
-    { stat = "Maximum", yAxis = "right", label = "Change vs prior-day mean (%)" }],
+    { stat = "Maximum", yAxis = "right", label = "Change vs prior 7-day mean (%)" }],
   ]
 
   layer_widgets = [
