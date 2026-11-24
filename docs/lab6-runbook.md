@@ -43,3 +43,25 @@ In each weekly scoring cycle, the distribution of churn scores in the captured p
 This signal is useful because the retention program acts on the share of customers the model flags. If the score distribution moves, the population sent to retention changes before anyone knows whether those customers churn. Read together with the feature tests, the signal separates two cases. If the scores shift and the monitored features also drift, the cause is most likely data drift and is handled as described in section 2. If the scores shift and no monitored feature drifts, the change comes either from features or combinations of features that the tests do not cover, or from customers with the same profile behaving differently, and it is treated as suspected concept drift.
 
 This approach cannot detect a change in churn risk that leaves both the inputs and the scores unchanged. That case is caught only by the labeled evaluation, which measures recall in the top 10% for the cohort scored 90 days earlier. Whenever the proxy fires, the labeled evaluation is run on the most recent cohort with known outcomes to confirm or rule out degradation.
+
+## Service Level Objectives
+
+All four SLOs are measured over a rolling 30-day window. The request-based budgets assume NorthStar's volume of about 2.1 million churn predictions a week, which comes to about 9.0 million predictions over 30 days (2.1 million × 30 / 7).
+
+| SLO | Target | SLI (Good Events / Total Events) | Error Budget | Deployment Freeze Trigger |
+|---|---|---|---|---|
+| Availability | 99.5% | Successful predictions / total requests | 0.5% of requests, about 45,000 failed predictions per 30 days | More than 45,000 failed predictions in the last 30 days |
+| Latency (p95) | < 20 ms (`ModelLatency` ≤ 20000) | Requests completing < 20 ms / total requests | 5% of requests, because the target is a 95th percentile, about 450,000 requests slower than 20 ms per 30 days | More than 450,000 requests slower than 20 ms in the last 30 days |
+| Prediction Quality | Recall@10% ≥ 0.25 on weekly sample | Weekly sample passing threshold / total weekly samples | 1 failed weekly sample per 30 days | A second failed weekly sample within the last 30 days |
+| Fairness | Recall gap across loyalty tiers ≤ 10pp | Weeks within fairness threshold / total weeks | 0 failed weeks per 30 days | Any weekly sample with a recall gap above 10 percentage points |
+
+When a freeze trigger fires, all deployments stop except rollbacks and changes that fix the breached SLO. The freeze lifts once the budget spent over the last 30 days is back within its limit. Deployments themselves also spend latency budget, because each one has a cold start of about 24 ms.
+
+Prediction quality is allowed one failed week because recall in the top 10% of a single weekly sample is noisy, so one miss may be sampling variation rather than a worse model. Fairness has no budget at all, because a recall gap between loyalty tiers means the retention program is treating customer groups differently. That is a governance commitment rather than a performance target.
+
+Each SLI is measured as follows:
+
+- Availability is one minus the sum of `Invocation5XXErrors` divided by the sum of `Invocations` in the `AWS/SageMaker` namespace, taken across both variants. 4XX responses are caller errors, so they are not counted as failures.
+- Latency is the `PR(:20000)` statistic on `ModelLatency` in `AWS/SageMaker`, which reports the share of requests that completed in 20000 microseconds or less, weighted by each variant's invocations.
+- Prediction quality is recall in the top 10% of scores for the weekly cohort scored 90 days earlier, whose churn outcomes are now known.
+- Fairness is recall in the top 10% computed separately for Bronze, Silver, Gold and Platinum customers on the same weekly sample, and the gap is the highest tier's recall minus the lowest tier's.
