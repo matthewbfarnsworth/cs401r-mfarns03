@@ -113,9 +113,18 @@ def drift_direction(method: str, value: float, threshold: float) -> bool:
     run_evidently_job.py refuses to launch while this function still raises
     NotImplementedError.
     """
-    raise NotImplementedError(
-        "drift_direction() is not implemented -- see the TODO in "
-        "monitoring/evidently_drift.py")
+    m = method.lower()
+    # Statistics: larger means the two distributions are further apart.
+    if m in ("psi", "jensenshannon"):
+        return value > threshold
+    # P-value: smaller means stronger evidence the distributions differ.
+    if m == "ks":
+        return value < threshold
+    # Refuse to guess the direction of a test this function does not know;
+    # a wrong guess would silently invert the result.
+    raise ValueError(
+        f"drift_direction(): unknown method {method!r}; add its direction "
+        "before using it in DRIFT_PLAN")
 
 
 def load_baseline(path: str) -> pd.DataFrame:

@@ -1,0 +1,370 @@
+{
+    "widgets": [
+        {
+            "height": 7,
+            "properties": {
+                "metrics": [
+                    [
+                        "/aws/sagemaker/Endpoints",
+                        "CPUUtilization",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "VariantName",
+                        "champion"
+                    ],
+                    [
+                        "/aws/sagemaker/Endpoints",
+                        "MemoryUtilization",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "VariantName",
+                        "champion"
+                    ],
+                    [
+                        "/aws/sagemaker/Endpoints",
+                        "DiskUtilization",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "VariantName",
+                        "champion"
+                    ]
+                ],
+                "period": 300,
+                "region": "us-east-1",
+                "stacked": false,
+                "title": "1. Infrastructure: champion instance utilization (%)",
+                "view": "timeSeries"
+            },
+            "type": "metric",
+            "width": 12,
+            "x": 0,
+            "y": 0
+        },
+        {
+            "height": 7,
+            "properties": {
+                "metrics": [
+                    [
+                        "AWS/SageMaker",
+                        "ModelLatency",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "VariantName",
+                        "champion",
+                        {
+                            "label": "ModelLatency p50 (us)",
+                            "stat": "p50"
+                        }
+                    ],
+                    [
+                        "AWS/SageMaker",
+                        "ModelLatency",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "VariantName",
+                        "champion",
+                        {
+                            "label": "ModelLatency p95 (us)",
+                            "stat": "p95"
+                        }
+                    ],
+                    [
+                        "AWS/SageMaker",
+                        "ModelLatency",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "VariantName",
+                        "champion",
+                        {
+                            "label": "ModelLatency p99 (us)",
+                            "stat": "p99"
+                        }
+                    ],
+                    [
+                        "AWS/SageMaker",
+                        "Invocations",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "VariantName",
+                        "champion",
+                        {
+                            "stat": "Sum",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "AWS/SageMaker",
+                        "Invocation4XXErrors",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "VariantName",
+                        "champion",
+                        {
+                            "stat": "Sum",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "AWS/SageMaker",
+                        "Invocation5XXErrors",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "VariantName",
+                        "champion",
+                        {
+                            "stat": "Sum",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "period": 300,
+                "region": "us-east-1",
+                "stacked": false,
+                "title": "2. Model serving: champion latency and request outcomes",
+                "view": "timeSeries"
+            },
+            "type": "metric",
+            "width": 12,
+            "x": 12,
+            "y": 0
+        },
+        {
+            "height": 7,
+            "properties": {
+                "metrics": [
+                    [
+                        "NorthStar/ChurnModel",
+                        "DriftDetected",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        {
+                            "stat": "Maximum"
+                        }
+                    ],
+                    [
+                        "NorthStar/ChurnModel",
+                        "ViolationCount",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        {
+                            "stat": "Maximum"
+                        }
+                    ],
+                    [
+                        "NorthStar/ChurnModel",
+                        "DriftKSPValue",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "Feature",
+                        "category_diversity_score",
+                        {
+                            "label": "DriftKSPValue category_diversity_score",
+                            "stat": "Maximum",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "NorthStar/ChurnModel",
+                        "DriftKSPValue",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "Feature",
+                        "total_spend_90d",
+                        {
+                            "label": "DriftKSPValue total_spend_90d",
+                            "stat": "Maximum",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "NorthStar/ChurnModel",
+                        "DriftPSI",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "Feature",
+                        "days_since_last_purchase",
+                        {
+                            "label": "DriftPSI days_since_last_purchase",
+                            "stat": "Maximum",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "NorthStar/ChurnModel",
+                        "DriftPSI",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "Feature",
+                        "purchase_frequency_30d",
+                        {
+                            "label": "DriftPSI purchase_frequency_30d",
+                            "stat": "Maximum",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "NorthStar/ChurnModel",
+                        "DriftPSI",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        "Feature",
+                        "avg_order_value",
+                        {
+                            "label": "DriftPSI avg_order_value",
+                            "stat": "Maximum",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "period": 300,
+                "region": "us-east-1",
+                "stacked": false,
+                "title": "3. Model quality: drift result and per-feature PSI / KS p-value",
+                "view": "timeSeries"
+            },
+            "type": "metric",
+            "width": 12,
+            "x": 0,
+            "y": 7
+        },
+        {
+            "height": 7,
+            "properties": {
+                "metrics": [
+                    [
+                        "Glue",
+                        "glue.driver.aggregate.elapsedTime",
+                        "JobName",
+                        "northstar-dev-transform",
+                        "JobRunId",
+                        "ALL",
+                        "Type",
+                        "count",
+                        {
+                            "label": "northstar-dev-transform elapsed (ms)",
+                            "stat": "Maximum"
+                        }
+                    ],
+                    [
+                        "Glue",
+                        "glue.driver.aggregate.elapsedTime",
+                        "JobName",
+                        "northstar-dev-feature-engineer",
+                        "JobRunId",
+                        "ALL",
+                        "Type",
+                        "count",
+                        {
+                            "label": "northstar-dev-feature-engineer elapsed (ms)",
+                            "stat": "Maximum"
+                        }
+                    ],
+                    [
+                        "Glue",
+                        "glue.driver.aggregate.numFailedTasks",
+                        "JobName",
+                        "northstar-dev-transform",
+                        "JobRunId",
+                        "ALL",
+                        "Type",
+                        "count",
+                        {
+                            "label": "northstar-dev-transform failed tasks",
+                            "stat": "Sum",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "Glue",
+                        "glue.driver.aggregate.numFailedTasks",
+                        "JobName",
+                        "northstar-dev-feature-engineer",
+                        "JobRunId",
+                        "ALL",
+                        "Type",
+                        "count",
+                        {
+                            "label": "northstar-dev-feature-engineer failed tasks",
+                            "stat": "Sum",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "AWS/Events",
+                        "TriggeredRules",
+                        "RuleName",
+                        "northstar-glue-job-failed",
+                        {
+                            "label": "Glue failure events",
+                            "stat": "Sum",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "period": 300,
+                "region": "us-east-1",
+                "stacked": false,
+                "title": "4. Data pipeline: Glue job runs and failure events",
+                "view": "timeSeries"
+            },
+            "type": "metric",
+            "width": 12,
+            "x": 12,
+            "y": 7
+        },
+        {
+            "height": 7,
+            "properties": {
+                "metrics": [
+                    [
+                        "NorthStar/ChurnModel",
+                        "ChurnAlertVolume",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        {
+                            "label": "Churn alerts per day",
+                            "stat": "Maximum"
+                        }
+                    ],
+                    [
+                        "NorthStar/ChurnModel",
+                        "ChurnAlertVolumeChangePct",
+                        "EndpointName",
+                        "northstar-churn-prod",
+                        {
+                            "label": "Change vs prior-day mean (%)",
+                            "stat": "Maximum",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "period": 86400,
+                "region": "us-east-1",
+                "stacked": false,
+                "title": "5. Business: daily churn-alert volume",
+                "view": "timeSeries"
+            },
+            "type": "metric",
+            "width": 12,
+            "x": 0,
+            "y": 14
+        },
+        {
+            "height": 7,
+            "properties": {
+                "alarms": [
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-cpu-p90-high",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-latency-p95-high",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-drift-detected",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-alert-volume-drop",
+                    "arn:aws:cloudwatch:us-east-1:182243447601:alarm:northstar-churn-rollback-latency"
+                ],
+                "title": "Alarm status"
+            },
+            "type": "alarm",
+            "width": 12,
+            "x": 12,
+            "y": 14
+        }
+    ]
+}

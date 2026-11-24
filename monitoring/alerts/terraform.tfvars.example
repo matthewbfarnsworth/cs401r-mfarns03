@@ -1,0 +1,2 @@
+# Copy to terraform.tfvars (gitignored) and fill in. Do not commit the copy.
+alert_email = "oncall@example.com"

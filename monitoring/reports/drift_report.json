@@ -1,0 +1,72 @@
+{
+  "metrics": [
+    {
+      "id": "dbca429d06e7fc1ff624605c315db8df",
+      "metric_name": "ValueDrift(column=days_since_last_purchase,method=psi,threshold=0.2)",
+      "config": {
+        "type": "evidently:metric_v2:ValueDrift",
+        "column": "days_since_last_purchase",
+        "method": "psi",
+        "threshold": 0.2
+      },
+      "value": 0.03687470989307515
+    },
+    {
+      "id": "f60c6f59de3e84ef7bcb53ee82db2dda",
+      "metric_name": "ValueDrift(column=purchase_frequency_30d,method=psi,threshold=0.2)",
+      "config": {
+        "type": "evidently:metric_v2:ValueDrift",
+        "column": "purchase_frequency_30d",
+        "method": "psi",
+        "threshold": 0.2
+      },
+      "value": 0.00911867577622237
+    },
+    {
+      "id": "ece7c9c361ae6bbdf6a7f349df26b04b",
+      "metric_name": "ValueDrift(column=avg_order_value,method=psi,threshold=0.2)",
+      "config": {
+        "type": "evidently:metric_v2:ValueDrift",
+        "column": "avg_order_value",
+        "method": "psi",
+        "threshold": 0.2
+      },
+      "value": 0.0478347964265181
+    },
+    {
+      "id": "2942d9777781f4e61b9026a5f3a0ad4e",
+      "metric_name": "ValueDrift(column=category_diversity_score,method=ks,threshold=0.05)",
+      "config": {
+        "type": "evidently:metric_v2:ValueDrift",
+        "column": "category_diversity_score",
+        "method": "ks",
+        "threshold": 0.05
+      },
+      "value": 0.17965148499635977
+    },
+    {
+      "id": "4e019117243bf940f5ef557466a0a517",
+      "metric_name": "ValueDrift(column=total_spend_90d,method=ks,threshold=0.05)",
+      "config": {
+        "type": "evidently:metric_v2:ValueDrift",
+        "column": "total_spend_90d",
+        "method": "ks",
+        "threshold": 0.05
+      },
+      "value": 0.8732970400095852
+    },
+    {
+      "id": "8a8b69ee77cd8773c291cf3f6f78d5f0",
+      "metric_name": "DriftedColumnsCount(drift_share=0.3)",
+      "config": {
+        "type": "evidently:metric_v2:DriftedColumnsCount",
+        "drift_share": 0.3
+      },
+      "value": {
+        "count": 0.0,
+        "share": 0.0
+      }
+    }
+  ],
+  "tests": []
+}
