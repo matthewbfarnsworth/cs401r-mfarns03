@@ -17,6 +17,19 @@
 # whose endpoint has vanished still fires; it just fails each time, and you are
 # billed for the instance each failed job spins up.
 #
+# FULL TEARDOWN. This script is the single entry point for removing everything
+# the NorthStar platform runs on, in an order that works:
+#   1-4  SageMaker monitoring, processing jobs, scaling targets, endpoint, models
+#   5a   terraform destroy of monitoring/alerts (SNS topic and subscription,
+#        Glue failure rule, alarms, composite alarms, dashboard)
+#   5    any northstar alarms Terraform did not own
+#   7    the Lab 2 platform stack via scripts/teardown-lab2.sh (data bucket,
+#        VPC and NAT, Studio domain, Glue, Feature Store, IAM roles)
+#   8    independent all-region sweep, plus checks that the monitoring stack
+#        is gone
+# Kept on purpose: the Terraform state bucket (bootstrap-state.sh), the Model
+# Registry packages and the serverless MLflow App. They are needed to rebuild.
+#
 # Usage: bash scripts/teardown-lab6.sh
 set -uo pipefail
 
@@ -103,6 +116,35 @@ for M in $(aws sagemaker list-models --region "${REGION}" \
   aws sagemaker delete-model --model-name "$M" --region "${REGION}" 2>/dev/null && ok "deleted model $M"
 done
 
+# ── 5a. Monitoring alerts stack (Terraform) ──────────────────────────────────
+# monitoring/alerts owns the SNS topic and email subscription, the Glue failure
+# EventBridge rule, every Task 1 and Task 3 alarm, the composite alarms and the
+# dashboard. Destroying it through Terraform removes them in dependency order
+# (composites before the alarms they reference) and keeps its state in step
+# with the account. Step 5 then removes any northstar alarm Terraform did not
+# own, such as a rollback alarm recreated by a later deploy.
+step "5a - Monitoring alerts stack (terraform destroy monitoring/alerts)"
+ALERTS_DIR="monitoring/alerts"
+ALERTS_FAIL=0
+if [ -f "${ALERTS_DIR}/terraform.tfstate" ] && \
+   [ -n "$(terraform -chdir="${ALERTS_DIR}" state list 2>/dev/null)" ]; then
+  # alert_email has no default. The value does not matter for a destroy, so a
+  # placeholder is used when the gitignored terraform.tfvars is absent.
+  ALERT_VARS=""
+  [ -f "${ALERTS_DIR}/terraform.tfvars" ] || ALERT_VARS="-var=alert_email=teardown@example.invalid"
+  terraform -chdir="${ALERTS_DIR}" init -input=false >/dev/null 2>&1
+  # shellcheck disable=SC2086
+  terraform -chdir="${ALERTS_DIR}" destroy -auto-approve -input=false -no-color ${ALERT_VARS} 2>&1 | tail -3
+  if [ "${PIPESTATUS[0]}" -eq 0 ]; then
+    ok "monitoring/alerts destroyed"
+  else
+    warn "terraform destroy of monitoring/alerts failed; fix and re-run this script"
+    ALERTS_FAIL=1
+  fi
+else
+  ok "no monitoring/alerts state to destroy"
+fi
+
 # ── 5. CloudWatch alarms ──────────────────────────────────────────────────────
 step "5 - CloudWatch alarms"
 # Composite alarms first. describe-alarms returns them under CompositeAlarms,
@@ -164,14 +206,43 @@ fi
 # Not deleted: the datacapture/ lifecycle rule expires objects after 7 days, and
 # the captured records are evidence a grader may want to see. S3 storage for a
 # lab-sized capture is fractions of a cent.
-step "6 - Captured inference data (retained by design)"
+step "6 - Captured inference data (removed with the data bucket in step 7)"
 CAP=$(aws s3 ls "s3://${BUCKET}/datacapture/" --recursive 2>/dev/null | grep -c jsonl || true)
-ok "${CAP:-0} capture object(s) left in s3://${BUCKET}/datacapture/ (7-day lifecycle)"
+ok "${CAP:-0} capture object(s) in s3://${BUCKET}/datacapture/ before the bucket is emptied"
 REP=$(aws s3 ls "s3://${BUCKET}/monitoring/" --recursive 2>/dev/null | wc -l | tr -d ' ')
-ok "${REP} monitoring artifact(s) retained under s3://${BUCKET}/monitoring/"
+ok "${REP} monitoring artifact(s) under s3://${BUCKET}/monitoring/ before the bucket is emptied"
+echo "  The committed copies in monitoring/reports/ and monitoring/baseline/ are the retained evidence."
 
-# ── 7. Verification sweep ─────────────────────────────────────────────────────
-step "7 - Verification (independent all-region sweep)"
+# ── 7. Lab 2 platform stack ───────────────────────────────────────────────────
+# teardown-lab2.sh empties the versioned data bucket, removes the resources
+# Terraform does not own (Glue ENIs, Studio EFS and NFS security groups, the
+# Feature Store catalog, Lab 2 lineage), runs terraform destroy on
+# infrastructure/environments/<env>, and verifies. Its console output is
+# captured in this file. It also writes its terraform destroy log to
+# docs/lab2-destroy-output.txt, which is committed Lab 2 evidence, so that file
+# is copied aside first and put back afterwards.
+step "7 - Lab 2 platform stack (scripts/teardown-lab2.sh)"
+LAB2_EVIDENCE="docs/lab2-destroy-output.txt"
+LAB2_SAVED=""
+if [ -f "${LAB2_EVIDENCE}" ]; then
+  LAB2_SAVED=$(mktemp)
+  cp "${LAB2_EVIDENCE}" "${LAB2_SAVED}"
+fi
+if bash scripts/teardown-lab2.sh; then
+  LAB2_FAIL=0
+  ok "Lab 2 platform stack destroyed and verified"
+else
+  LAB2_FAIL=1
+  warn "teardown-lab2.sh reported resources still present; see above"
+fi
+if [ -n "${LAB2_SAVED}" ]; then
+  LAB2_LOG=$(mktemp)
+  cp "${LAB2_EVIDENCE}" "${LAB2_LOG}" 2>/dev/null
+  cp "${LAB2_SAVED}" "${LAB2_EVIDENCE}" && ok "restored ${LAB2_EVIDENCE}; this run's destroy log is ${LAB2_LOG}"
+fi
+
+# ── 8. Verification sweep ─────────────────────────────────────────────────────
+step "8 - Verification (independent all-region sweep)"
 sleep 15
 FAIL=0
 # --query applies PER PAGE: a paginated list prints one length per page
@@ -204,11 +275,25 @@ for R in us-east-1 us-east-2 us-west-1 us-west-2 eu-west-1 eu-central-1 ap-south
   fi
 done
 
+# The monitoring stack lives in REGION only. Each leftover counts as a failure.
+MON=0
+C=$(aws cloudwatch describe-alarms --region "${REGION}" --alarm-types CompositeAlarm MetricAlarm \
+  --query 'length([CompositeAlarms[?contains(AlarmName,`northstar`)], MetricAlarms[?contains(AlarmName,`northstar`)]][])' \
+  --output text 2>/dev/null); [ "${C:-0}" = "0" ] || { warn "${REGION} northstar alarms (metric + composite) still present: ${C}"; MON=1; }
+T=$(aws sns list-topics --region "${REGION}" --query 'length(Topics[?contains(TopicArn,`northstar`)])' --output text 2>/dev/null | sum_pages)
+[ "${T:-0}" = "0" ] || { warn "${REGION} northstar SNS topics still present: ${T}"; MON=1; }
+R=$(aws events list-rules --region "${REGION}" --name-prefix northstar --query 'length(Rules)' --output text 2>/dev/null | sum_pages)
+[ "${R:-0}" = "0" ] || { warn "${REGION} northstar EventBridge rules still present: ${R}"; MON=1; }
+DB=$(aws cloudwatch list-dashboards --region "${REGION}" --dashboard-name-prefix NorthStar --query 'length(DashboardEntries)' --output text 2>/dev/null | sum_pages)
+[ "${DB:-0}" = "0" ] || { warn "${REGION} NorthStar dashboards still present: ${DB}"; MON=1; }
+[ "${MON}" -eq 0 ] && ok "${REGION} monitoring stack gone (alarms, composites, SNS topic, EventBridge rule, dashboard)"
+FAIL=$((FAIL + MON + ALERTS_FAIL + LAB2_FAIL))
+
 echo
 if [ "${FAIL}" -eq 0 ]; then
   printf "\033[32m\033[1mTEARDOWN COMPLETE - nothing is billing hourly.\033[0m\n"
 else
-  printf "\033[31m\033[1m%s region(s) still have live resources. Investigate before you submit.\033[0m\n" "${FAIL}"
+  printf "\033[31m\033[1m%s check(s) failed. Investigate the WARN lines above before you submit.\033[0m\n" "${FAIL}"
 fi
 echo "finished $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "evidence written to ${OUT}"

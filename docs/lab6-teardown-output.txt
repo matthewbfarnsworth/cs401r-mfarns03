@@ -1,0 +1,105 @@
+NorthStar Lab 6 teardown - account 182243447601, region us-east-1
+started 2026-11-24T23:38:46Z
+
+
+[1m1 - Monitoring schedules (delete before the endpoint)[0m
+  [32mOK[0m    none found
+
+[1m2 - In-flight monitoring processing jobs[0m
+  [32mOK[0m    none running
+
+[1m3 - Auto-scaling targets[0m
+  [32mOK[0m    none registered
+
+[1m4 - Endpoint and its dependencies[0m
+  [32mOK[0m    deleted endpoint northstar-churn-prod (this is what stops the hourly charge)
+  [32mOK[0m    deleted endpoint config northstar-churn-canary-1795293821
+  [32mOK[0m    deleted model northstar-churn-canary
+  [32mOK[0m    deleted model northstar-churn-champion
+
+[1m5a - Monitoring alerts stack (terraform destroy monitoring/alerts)[0m
+aws_sns_topic.alerts: Destruction complete after 0s
+
+Destroy complete! Resources: 17 destroyed.
+  [32mOK[0m    monitoring/alerts destroyed
+
+[1m5 - CloudWatch alarms[0m
+  [32mOK[0m    no composite alarms found
+  [32mOK[0m    none found
+
+[1m5b - CloudWatch anomaly detectors (orphaned by terraform destroy)[0m
+  [32mOK[0m    none found
+
+[1m6 - Captured inference data (removed with the data bucket in step 7)[0m
+  [32mOK[0m    4 capture object(s) in s3://northstar-dev-data-182243447601/datacapture/ before the bucket is emptied
+  [32mOK[0m    9 monitoring artifact(s) under s3://northstar-dev-data-182243447601/monitoring/ before the bucket is emptied
+  The committed copies in monitoring/reports/ and monitoring/baseline/ are the retained evidence.
+
+[1m7 - Lab 2 platform stack (scripts/teardown-lab2.sh)[0m
+==> Lab 2 teardown
+    Account : 182243447601
+    Region  : us-east-1
+    Bucket  : northstar-dev-data-182243447601
+
+{
+    "BucketArn": "arn:aws:s3:::northstar-dev-data-182243447601",
+    "BucketRegion": "us-east-1",
+    "AccessPointAlias": false
+}
+[1/7] Emptying northstar-dev-data-182243447601 (all versions and delete markers)
+      removed 163 Versions
+      removed 10 DeleteMarkers
+[2/7] Removing Feature Store Glue catalog database
+      deleted sagemaker_featurestore
+[2b/7] Removing orphaned Glue network interfaces
+[3/7] terraform destroy
+[0m[1mmodule.vpc.aws_subnet.private: Destruction complete after 1s[0m
+[0m[1mmodule.vpc.aws_vpc.this: Destroying... [id=vpc-0a6d5d6307a4cc227][0m[0m
+[0m[1mmodule.vpc.aws_vpc.this: Destruction complete after 1s[0m
+[0m[1m[32m
+Destroy complete! Resources: 36 destroyed.[0m
+[4/7] Removing orphaned SageMaker Studio EFS filesystems
+[5/7] Removing orphaned ENIs and SageMaker NFS security groups
+[6/7] Removing Lab 2's SageMaker lineage (feature group only)
+      unlinked northstar-dev-customer-features-1795292584 -> northstar-dev-customer-features-1795292584-feature-group-pipeline-version
+      unlinked northstar-dev-customer-features-1795292584 -> northstar-dev-customer-features-1795292584-feature-group-pipeline
+      unlinked northstar-dev-customer-features-1795292584 -> daea28de09acc8216075ac277bd80534
+      deleted artifact daea28de09acc8216075ac277bd80534
+      deleted context northstar-dev-customer-features-1795292584
+      deleted context northstar-dev-customer-features-1795292584-feature-group-pipeline
+      deleted context northstar-dev-customer-features-1795292584-feature-group-pipeline-version
+      deleted log group /aws-glue/crawlers
+      deleted log group /aws-glue/jobs/error
+      deleted log group /aws-glue/jobs/logs-v2
+      deleted log group /aws-glue/jobs/output
+[7/7] Verifying teardown
+      NAT gateways           OK
+      Elastic IPs            OK
+      SageMaker domains      OK
+      Feature groups         OK
+      EFS filesystems        OK
+      Glue jobs              OK
+      NorthStar VPCs         OK
+      Lineage contexts       2 left (metadata, not billed; not a failure)
+      Lineage artifacts      25 left (metadata, not billed; not a failure)
+      Glue databases         OK
+
+==> Teardown complete. No billable Lab 2 resources remain.
+    The Terraform state bucket is intentionally retained for Lab 3.
+  [32mOK[0m    Lab 2 platform stack destroyed and verified
+  [32mOK[0m    restored docs/lab2-destroy-output.txt; this run's destroy log is /var/folders/2v/3p5_ncs15nbd8rsf4rgdlh600000gn/T/tmp.7Y8Vb0WKaj
+
+[1m8 - Verification (independent all-region sweep)[0m
+  [32mOK[0m    us-east-1 clean
+  [32mOK[0m    us-east-2 clean
+  [32mOK[0m    us-west-1 clean
+  [32mOK[0m    us-west-2 clean
+  [32mOK[0m    eu-west-1 clean
+  [32mOK[0m    eu-central-1 clean
+  [32mOK[0m    ap-southeast-1 clean
+  [32mOK[0m    ap-northeast-1 clean
+  [32mOK[0m    us-east-1 monitoring stack gone (alarms, composites, SNS topic, EventBridge rule, dashboard)
+
+[32m[1mTEARDOWN COMPLETE - nothing is billing hourly.[0m
+finished 2026-11-24T23:41:18Z
+evidence written to docs/lab6-teardown-output.txt

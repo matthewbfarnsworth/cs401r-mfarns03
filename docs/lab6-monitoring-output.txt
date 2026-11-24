@@ -112,3 +112,8 @@ northstar-churn-rollback-latency	ModelLatency	200000.0	OK
 
 ===== 11. Dashboard  (2026-11-24T23:09:52Z) =====
 NorthStar-AI-Platform	2026-11-24T16:09:40-07:00
+
+===== 12. After teardown: live API  (2026-11-24T23:41:33Z) =====
+endpoints:              0
+running processing jobs: 0
+northstar alarms:       0
