@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Lab 7: Metrics + Economics &amp; Business Value</title>
+<style>
+ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+      line-height:1.55;max-width:52rem;margin:2rem auto;padding:0 1.25rem;color:#1a1a1a}
+ code{background:#f4f4f4;padding:.12em .35em;border-radius:3px;font-size:.92em}
+ pre{background:#f4f4f4;padding:1rem;border-radius:5px;overflow-x:auto}
+ pre code{background:none;padding:0}
+ table{border-collapse:collapse;width:100%;margin:1rem 0}
+ th,td{border:1px solid #ccc;padding:.5rem .6rem;text-align:left;vertical-align:top}
+ th{background:#f0f0f0}
+ blockquote{border-left:4px solid #c8102e;margin:1rem 0;padding:.4rem 1rem;background:#fafafa}
+ h1,h2,h3{line-height:1.25} hr{border:none;border-top:1px solid #ddd;margin:2rem 0}
+</style></head><body>
+<h1 id="lab-7-metrics-economics-business-value">Lab 7: Metrics + Economics &amp; Business Value</h1>
+<p><strong>Assigned:</strong> Thu Nov 19 | <strong>Due:</strong> Tue Dec 1, midnight <em>(Tuesday exception — see syllabus)</em>
+<strong>Chapters:</strong> <em>Metrics, Benchmarks &amp; Guardrails</em>, <em>AI Economics</em>, <em>Measuring Business Value</em>
+<strong>Builds on:</strong> Labs 1–6 — measures the value and cost of the platform you built</p>
+<h2 id="objective">Objective</h2>
+<p>The NorthStar platform is live. Now answer the question every CFO and CDO will ask: <em>is it worth it?</em></p>
+<p>This lab builds the measurement infrastructure to answer that question rigorously — a metric pyramid, unit economics computed from your own measured usage, and an executive scorecard that traces from model outputs to business outcomes. Every number you produce must be derived from something you or the reference implementation actually observed. <strong>Invented figures score zero even when they are plausible.</strong></p>
+<p>Governance and closing-the-loop content is addressed in the team project. This lab is economics and value measurement.</p>
+<h2 id="starter-kit">Starter Kit</h2>
+<p><strong>None.</strong> Labs 5–7 have no starter kit. Lab 7 consumes what Labs 1–6 produced.</p>
+<hr />
+<h2 id="getting-your-repository">Getting Your Repository</h2>
+<p>Keep working in the repository you created for Lab 1, <code>cs401r-&lt;your-netid&gt;</code>.
+This lab extends the platform you already built; <strong>do not start a new repository.</strong></p>
+<h3 id="submitting-lab-7">Submitting Lab 7</h3>
+<p>When you are ready to submit, tag the commit you want graded and push the tag:</p>
+<pre><code class="language-bash">git tag lab7-submit
+git push origin lab7-submit
+</code></pre>
+<p>Then submit <strong>your repository URL</strong> in Canvas. You do not submit the tag name —
+it is always <code>lab7-submit</code> for this lab, and the TA looks for it.</p>
+<p>The TA grades <code>git checkout lab7-submit</code>, so anything you push afterwards while
+starting the next lab does not change this lab's grade. <strong>If you forget the tag, you
+are graded at your last commit before the Canvas deadline</strong> — which, if you have already
+started the next lab, may not be the work you meant to submit. Tag it.</p>
+<blockquote>
+<p><strong>Public repositories, deliberately.</strong> You may read how other students approached
+the problem. Copying their work is plagiarism and is handled under the BYU Honor
+Code — commit your own. And because these are public: never commit credentials.
+No <code>.env</code>, no <code>terraform.tfvars</code>, no AWS keys. Committed secrets are an automatic
+zero. The provided <code>.gitignore</code> already excludes them; do not remove those lines.</p>
+</blockquote>
+<hr />
+<h2 id="read-this-first-cost">Read This First — Cost</h2>
+<p><strong>Lab 7 is the cheapest lab in the course, and the only one with no infrastructure to tear down.</strong></p>
+<p>It requires no endpoint, no processing job, no Glue run, and no Terraform apply. Every AWS call in this lab is read-only.</p>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Rate</th>
+<th>This lab's usage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aws pricing get-products</code></td>
+<td><strong>free</strong></td>
+<td>~10 calls</td>
+</tr>
+<tr>
+<td><code>aws ce get-cost-and-usage</code></td>
+<td><strong>$0.01 per request</strong></td>
+<td>~5 calls = <strong>$0.05</strong></td>
+</tr>
+<tr>
+<td><code>aws cloudwatch get-metric-statistics</code></td>
+<td>$0.01 per 1,000</td>
+<td>negligible</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Total expected spend: under $0.10.</strong> If you find yourself launching an instance in Lab 7, stop — you have misread a task.</p>
+<p>There is no teardown script for this lab because there is nothing to tear down. There <em>is</em> still a teardown gate, and it is inherited: see <strong>Teardown</strong> at the end.</p>
+<h2 id="read-this-second-your-aws-bill-is-not-your-cost">Read This Second — Your AWS Bill Is Not Your Cost</h2>
+<p>Before you start, understand the single most important fact in this lab.</p>
+<p>The reference account ran <strong>all of Labs 1 through 6</strong> during July 2026 — Feature Store ingestion, Glue ETL and crawlers, three SageMaker endpoints across three instance families, model-monitoring processing jobs, CodeBuild, a NAT gateway, KMS, CloudWatch alarms and custom metrics. Cost Explorer reports the following for that month:</p>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Measured usage</th>
+<th>Billed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SageMaker Hosting <code>ml.m5.large</code></td>
+<td>0.5889 hr</td>
+<td><strong>$0.00</strong></td>
+</tr>
+<tr>
+<td>SageMaker Hosting <code>ml.t2.medium</code></td>
+<td>0.4328 hr</td>
+<td><strong>$0.00</strong></td>
+</tr>
+<tr>
+<td>SageMaker Hosting <code>ml.m6g.large</code></td>
+<td>0.0192 hr</td>
+<td><strong>$0.00</strong></td>
+</tr>
+<tr>
+<td>SageMaker Processing <code>ml.t3.large</code></td>
+<td>0.0958 hr</td>
+<td><strong>$0.00</strong></td>
+</tr>
+<tr>
+<td>SageMaker Processing <code>ml.t3.medium</code></td>
+<td>0.2283 hr</td>
+<td><strong>$0.00</strong></td>
+</tr>
+<tr>
+<td>Glue ETL</td>
+<td>1.0311 DPU-hr</td>
+<td><strong>$0.00</strong></td>
+</tr>
+<tr>
+<td>Glue Crawler</td>
+<td>0.4786 DPU-hr</td>
+<td><strong>$0.00</strong></td>
+</tr>
+<tr>
+<td>Feature Store writes</td>
+<td>7,967 request units</td>
+<td><strong>$0.00</strong></td>
+</tr>
+<tr>
+<td>S3 requests</td>
+<td>764 PUT / 3,260 GET</td>
+<td><strong>$0.00</strong></td>
+</tr>
+<tr>
+<td>NAT Gateway</td>
+<td>4 hr</td>
+<td><strong>$0.00</strong></td>
+</tr>
+<tr>
+<td>CodeBuild</td>
+<td>10 build-minutes</td>
+<td><strong>$0.00</strong></td>
+</tr>
+<tr>
+<td><strong>Whole account, whole month</strong></td>
+<td></td>
+<td><strong>$0.00</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Free tier absorbed the entire platform. <strong>Your bill will look the same, and it will teach you nothing.</strong></p>
+<p>This is not a quirk of a course account. It is the ordinary condition of every pilot AI system inside a large enterprise: the workload runs on committed capacity, an enterprise agreement, a shared account, or credits, and the invoice line that would tell you what it costs does not exist. Meanwhile the same system at production scale is a real budget line that someone has to defend.</p>
+<p><strong>So the rule for this lab, and for the rest of your career:</strong></p>
+<blockquote>
+<p><strong>Unit economics are computed from <code>usage × published rate</code>. Never from the invoice.</strong>
+The invoice tells you what you were charged. The rate card tells you what you consumed. Only the second one scales, and only the second one survives contact with a CFO.</p>
+</blockquote>
+<p>Cost Explorer still has a job in this lab — as a <strong>cross-check on usage quantities</strong>, not on dollars. <code>--metrics UsageQuantity</code> is the reliable field. <code>--metrics UnblendedCost</code> will hand you zeros.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<h3 id="1-enable-cost-explorer-at-least-24-hours-before-you-start">1. Enable Cost Explorer at least 24 hours before you start</h3>
+<p>Cost Explorer is opt-in, and on first activation AWS takes <strong>up to 24 hours</strong> to prepare historical data. If you enable it the night the lab is due, you will get an empty result and no error explaining why.</p>
+<pre><code class="language-bash"># Enable in the console: Billing and Cost Management &gt; Cost Explorer &gt; Launch
+# Then confirm from the CLI (returns data only after preparation completes):
+aws ce get-cost-and-usage \
+  --time-period Start=2026-11-01,End=2026-12-01 \
+  --granularity MONTHLY --metrics UsageQuantity \
+  --group-by Type=DIMENSION,Key=SERVICE --region us-east-1
+</code></pre>
+<p>Two things can block this call, and they produce different errors:</p>
+<ul>
+<li><code>DataUnavailableException</code> — Cost Explorer is enabled but has not finished preparing. Wait.</li>
+<li><code>AccessDeniedException</code> — your IAM identity cannot read billing data. On some account configurations the <strong>root user</strong> must first activate <em>IAM user and role access to Billing information</em> (Account Settings). You cannot fix this from an IAM user, and you cannot fix it in the ten minutes before a deadline.</li>
+</ul>
+<p><strong>If Cost Explorer will not cooperate, the lab is still completable.</strong> Every dollar figure in this lab comes from the rate card. Cost Explorer is a convenience for reading your own usage quantities; you can substitute usage you logged during Labs 2–6. Say in your write-up which source you used.</p>
+<h3 id="2-the-price-list-api-is-your-rate-card-with-one-exception">2. The Price List API is your rate card — with one exception</h3>
+<p><code>aws pricing</code> is free, needs no quota, and is authoritative for everything you deployed:</p>
+<pre><code class="language-bash">aws pricing get-products --service-code AmazonSageMaker --region us-east-1 \
+  --filters 'Type=TERM_MATCH,Field=instanceName,Value=ml.m5.large' \
+            'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' \
+  --query 'PriceList' --output text | python3 -m json.tool | head -40
+</code></pre>
+<blockquote>
+<p><strong>The <code>pricing</code> endpoint exists only in <code>us-east-1</code> and <code>ap-south-1</code>.</strong> <code>--region us-east-1</code> is not optional, and it does not mean "price things in us-east-1" — that is what the <code>regionCode</code> filter is for. Getting this wrong returns an endpoint error, not a price.</p>
+</blockquote>
+<p><strong>The exception is Bedrock.</strong> The Price List API's Bedrock coverage in <code>us-east-1</code> is incomplete: it exposes input-token prices for a handful of older Claude models and <strong>no output-token prices at all</strong>. Verified 2026-08-01. If your second system is Track B or Track C, take LLM token prices from the Bedrock pricing page, cite the date you read it, and state it as an assumption. Do not silently substitute the Price List figure — an input-only cost model understates an LLM system by roughly half.</p>
+<h3 id="3-two-case-numbers-do-not-reconcile-you-must-handle-this-explicitly">3. Two case numbers do not reconcile. You must handle this explicitly.</h3>
+<p>This is a real inconsistency in the NorthStar case material, not a trick.</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Figure</th>
+<th>Population and window</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Case overview</td>
+<td>churn <strong>18% per year</strong></td>
+<td>2.1M active customers, annual</td>
+</tr>
+<tr>
+<td>Training dataset</td>
+<td>positive rate <strong>22.0%</strong></td>
+<td>~10,000 sampled customers, 90-day label</td>
+</tr>
+</tbody>
+</table>
+<p>A 22.0% rate per 90 days compounds to roughly <strong>63% per year</strong>, which is not 18%. The two figures describe different populations over different windows, and the sampled dataset is not a random draw from the customer base.</p>
+<p><strong>What this means for your work:</strong></p>
+<ul>
+<li><strong>Business math</strong> (value, ROI, lost LTV, the CDO's target) uses the case figures: 2.1M active customers, 18% annual churn, $340 lifetime value — which multiply to the case's stated $128.5M annual churn problem. That headline number is reproducible, and your analysis should reconcile to it.</li>
+<li><strong>Model math</strong> (recall, precision, lift, achievable coverage) uses the measured dataset figures: 22.0% base rate, Recall@10% of <strong>0.3106</strong> against a ceiling near 0.45.</li>
+<li><strong>Never multiply one by the other without saying so.</strong> Any place your analysis crosses between them, state the bridging assumption in one sentence. Task 2 is graded partly on whether you did.</li>
+</ul>
+<h3 id="4-the-churn-label-is-90-days">4. The churn label is 90 days</h3>
+<p>Lab 2 derives <code>churn_label</code> from a <strong>90-day holdout window</strong> following the observation period. Lab 3 trains against it, Lab 6's drift plan depends on it, and the case overview states it. Everything in Lab 7 — measurement windows, attribution windows, time-to-outcome — must use <strong>90 days</strong>.</p>
+<p>Watch the distinction between the <em>label</em> window and the <em>feature</em> windows, because both appear in the same table. <code>purchase_frequency_30d</code> looks <strong>back</strong> 30 days to build a feature; <code>churn_label</code> looks <strong>forward</strong> 90 days to record an outcome. A value methodology note that reports outcomes on a 30-day cycle has confused the two, and it will cost points in Task 4.</p>
+<h2 id="your-measured-inputs">Your Measured Inputs</h2>
+<p>You are not starting from a blank page. These are real, from the reference implementation, and you may use them directly. If your own Labs 2–6 produced different numbers, use yours and say so.</p>
+<p><strong>Model performance</strong> — <code>models/churn/train_reference.py</code> (the Athena path), measured end to end on 2026-08-02 against the 10,000-customer dataset, model-registry version <strong>v4</strong>, deterministic <code>ORDER BY</code> pull, <code>seed=42</code>, <code>test_size=0.30</code>. These supersede every earlier figure in circulation. Note the lift is <em>smaller</em> than previously published: the recency-only baseline is much stronger at this scale, so feature engineering buys less than the course used to claim — but for the first time the margin has an interval around it that excludes zero.</p>
+<table>
+<thead>
+<tr>
+<th>Quantity</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AUC-ROC</td>
+<td><strong>0.7696</strong></td>
+</tr>
+<tr>
+<td>Recency-only baseline AUC</td>
+<td>0.7233</td>
+</tr>
+<tr>
+<td>AUC lift over baseline</td>
+<td><strong>+0.0464</strong></td>
+</tr>
+<tr>
+<td>Lift 95% CI</td>
+<td><strong>[0.0254, 0.0670]</strong> — excludes zero</td>
+</tr>
+<tr>
+<td>Precision@10%</td>
+<td><strong>0.6833</strong></td>
+</tr>
+<tr>
+<td>Recall@10%</td>
+<td><strong>0.3106</strong></td>
+</tr>
+<tr>
+<td>Recall@10% theoretical ceiling at 22.0% base rate</td>
+<td><strong>~0.45</strong></td>
+</tr>
+<tr>
+<td>Train / test split</td>
+<td>6,999 / 3,000</td>
+</tr>
+<tr>
+<td>Lab 4 promotion gate / Lab 6 SLO</td>
+<td>Recall@10% ≥ 0.25</td>
+</tr>
+<tr>
+<td>Inference latency p95</td>
+<td><strong>~4.1 ms</strong></td>
+</tr>
+<tr>
+<td>Cold-start latency, first call after deploy</td>
+<td>~24 ms</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rate card (AWS Price List API, us-east-1, verified 2026-08-01)</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SageMaker Hosting <code>ml.t2.medium</code></td>
+<td>$0.056 / hr</td>
+</tr>
+<tr>
+<td>SageMaker Hosting <code>ml.m5.large</code></td>
+<td>$0.115 / hr</td>
+</tr>
+<tr>
+<td>SageMaker Hosting <code>ml.m6g.large</code></td>
+<td>$0.0924 / hr</td>
+</tr>
+<tr>
+<td>SageMaker Processing <code>ml.t3.medium</code></td>
+<td>$0.05 / hr</td>
+</tr>
+<tr>
+<td>SageMaker Processing <code>ml.t3.large</code></td>
+<td>$0.10 / hr</td>
+</tr>
+<tr>
+<td>SageMaker Serverless Inference, 2 GB</td>
+<td>$0.00004 / sec</td>
+</tr>
+<tr>
+<td>Glue ETL and Crawler</td>
+<td>$0.44 / DPU-hr</td>
+</tr>
+<tr>
+<td>Glue Flex ETL</td>
+<td>$0.29 / DPU-hr</td>
+</tr>
+<tr>
+<td>Feature Store writes</td>
+<td>$1.25 / million request units</td>
+</tr>
+<tr>
+<td>Feature Store reads</td>
+<td>$0.25 / million request units</td>
+</tr>
+<tr>
+<td>Feature Store online storage</td>
+<td>$0.45 / GB-month</td>
+</tr>
+<tr>
+<td>S3 standard storage</td>
+<td>$0.023 / GB-month</td>
+</tr>
+<tr>
+<td>S3 requests</td>
+<td>$0.005 / 1,000 PUT · $0.0004 / 1,000 GET</td>
+</tr>
+<tr>
+<td>CloudWatch alarm</td>
+<td>$0.10 / alarm-month</td>
+</tr>
+<tr>
+<td>CloudWatch custom metric</td>
+<td>$0.30 / metric-month (first 10,000)</td>
+</tr>
+<tr>
+<td>CloudWatch API request</td>
+<td>$0.01 / 1,000</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>The Price List API returns one pricing tier, and it may not be yours.</strong> Query <code>CW:MetricMonitorUsage</code> and it returns <strong>$0.02</strong> — the rate for accounts publishing over one million metrics. You are publishing about ten, so your rate is <strong>$0.30</strong>. The API answered a question you did not ask. Read the <code>description</code> field on every price dimension before you use the number in it. This has produced a 15x error in a real cost model.</p>
+</blockquote>
+<p><strong>Measured usage, full Labs 1–6 build (reference account, July 2026)</strong></p>
+<p>Reproduced from the table above: hosting 0.5889 / 0.4328 / 0.0192 hr, processing 0.0958 / 0.2283 hr, Glue 1.0311 ETL + 0.4786 crawler DPU-hr, Feature Store 7,967 write RU, S3 764 PUT / 3,260 GET, NAT 4 hr, CodeBuild 10 build-min.</p>
+<blockquote>
+<p><strong>These are July 2026 <em>cumulative</em> usage figures from Cost Explorer, measured on the retired 1,200-customer dataset.</strong> Two cautions. First, they are a month's total across every run, <strong>not the cost of one pass</strong> — scaling them as though they were per-run is a real error, and this course's own cost model made it until 2026-08-03. Second, the dataset is now 8x larger: a single measured ETL pass is roughly <strong>380–500 DPU-seconds</strong> across the two Glue jobs.</p>
+<p><strong>That range is the point, not a hedge.</strong> Four measured single-pass runs on byte-identical data gave <strong>430, 400, 380 and 502</strong> total DPU-seconds — a <strong>32% spread</strong> with no change to the input, the code, or the configuration. Glue bills on DPU-hours it decides you consumed, and that number moves run to run.</p>
+<p>So: <strong>do not report a single measured DPU figure as though it were a constant, and do not treat a number outside someone else's measurement as an error.</strong> If your pass lands at 380 or at 500, both are normal. If your cost model's conclusion changes materially between those two ends, the model is too sensitive to a noisy input and you should say so — that observation is worth more marks than a precise-looking point estimate. Use <em>your own</em> measured usage, state the range you observed, and say which quantity you are scaling.</p>
+</blockquote>
+<p>Two of these are worth noticing before you use them. The <code>ml.t3.large</code> figure of 0.0958 hr is <strong>5 min 45 s</strong> — one successful monitoring analyzer run. The <code>ml.t3.medium</code> figure of 0.2283 hr is <strong>13 min 42 s</strong> — one analyzer run that ran out of memory and failed. <strong>Failed jobs bill.</strong> A cost model built only from successful runs understates the truth, and in early-stage ML the failures are frequently the larger number. Yours will be.</p>
+<blockquote>
+<p><strong>These two figures are from SageMaker Model Monitor, which Lab 6 no longer uses</strong> — its Spark analyzer needed <code>ml.t3.large</code> and OOM'd on <code>ml.t3.medium</code>. Lab 6 now runs Evidently, which completes the same comparison in <strong>1 min 59 s on <code>ml.t3.medium</code></strong> for about <strong>$0.0017</strong>. The July figures are left here deliberately, because the comparison is the lesson: <strong>a tool substitution changed this line item by roughly 9x while changing nothing about the business question being answered.</strong> When you build your cost model in Task 2, that is the kind of lever worth looking for — far more of your bill is architecture choice than volume.</p>
+<p><strong>The same lever, one order of magnitude larger — experiment tracking.</strong> AWS offers two MLflow products that do the same job for your training runs:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>MLflow <strong>App</strong> (what Lab 3 uses)</th>
+<th>MLflow <strong>Tracking Server</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Billing model</td>
+<td>serverless, <strong>no additional charge</strong></td>
+<td><strong>$0.60/hr</strong>, from creation to deletion</td>
+</tr>
+<tr>
+<td>Cost per month, left running</td>
+<td><strong>$0.00</strong></td>
+<td><strong>~$438</strong></td>
+</tr>
+<tr>
+<td>Cost while you sleep</td>
+<td>$0.00</td>
+<td>$4.80/night</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Model this one in Task 2 and notice what it does to your unit economics.</strong> The tracking server is not a bigger instance or a faster tier — it is the <em>same capability with a different billing model</em>, and it costs infinitely more than free. A platform team that picked it without asking would have added ~$5,300/year per environment to NorthStar's bill for nothing.</p>
+<p>This is the shape of most real AI cost overruns. They are rarely "we used too much"; they are usually "we provisioned something that bills by the hour to do a job that bills by the request." <strong>When you present your scorecard, an architecture line item you eliminated is worth more than a usage line item you trimmed</strong> — and it is far more defensible to a CFO, because it does not require anyone to do less work.</p>
+</blockquote>
+<h2 id="deliverable">Deliverable</h2>
+<p><strong>One file: <code>docs/lab7-value-scorecard.md</code></strong>, with five top-level sections numbered to match the tasks:</p>
+<pre><code>## 1. Metric Pyramid
+## 2. Unit Economics
+## 3. Executive Value Scorecard
+## 4. Value Methodology Note
+## 5. Measurement Reflection
+</code></pre>
+<p><strong>Plus one machine-checkable artifact: <code>docs/lab7-cost-model.csv</code></strong>, with the header</p>
+<pre><code class="language-csv">line_item,category,usage_quantity,unit,rate_usd,monthly_cost_usd,source,assumption
+</code></pre>
+<p>Every dollar figure that appears in Section 2 must appear as a row in this file, and the rows must sum to your stated total. This is graded. It exists because a cost model whose arithmetic cannot be checked is an opinion.</p>
+<hr />
+<h2 id="tasks">Tasks</h2>
+<h3 id="task-1-metric-pyramid-25-points">Task 1 — Metric Pyramid (25 points)</h3>
+<p>Build the four-layer metric pyramid for <strong>two</strong> NorthStar AI systems:</p>
+<ol>
+<li><strong>Churn prediction</strong> (required — you deployed it), and</li>
+<li><strong>One of</strong> offer generation (Track B) or the customer service agent (Track C).</li>
+</ol>
+<blockquote>
+<p><strong>You do not need to have deployed the second system.</strong> Bedrock inference quotas start at zero on a new account and Track B/C may have been unavailable to you. Task 1 is a design and measurement-architecture exercise; the second pyramid is graded on the quality of its reasoning against the case material, not on whether the system exists in your account. Say in one line which track you chose and whether you deployed it.</p>
+</blockquote>
+<p><strong>The four layers:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Description</th>
+<th>Example (Churn)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Model / System</td>
+<td>Technical performance</td>
+<td>AUC-ROC 0.7696, p95 latency 4.1 ms</td>
+</tr>
+<tr>
+<td>Model Output</td>
+<td>What the model emits</td>
+<td>Score distribution, daily alert volume</td>
+</tr>
+<tr>
+<td>User Experience</td>
+<td>How people interact with the output</td>
+<td>Offer acceptance rate, campaign click-through</td>
+</tr>
+<tr>
+<td>Business Outcome</td>
+<td>Revenue or cost impact</td>
+<td>90-day retention rate, prevented churn revenue</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Required for each system:</strong></p>
+<ul>
+<li>At least <strong>2 metrics per layer</strong> (8 per system minimum).</li>
+<li>For each metric: <strong>calculation method, owner, update frequency, and the decision it informs.</strong> An owner is a named role from the NorthStar stakeholder table, not "the team." A decision is a stated threshold and the action taken when it is crossed.</li>
+<li><strong>Causal link analysis.</strong> For every adjacent-layer link in the chain, label it <strong>Validated</strong> or <strong>Assumed</strong>. A link is <em>Validated</em> only if both metrics are measured on the same population over the same window by an existing pipeline. Everything else is <em>Assumed</em>. For each Assumed link, name the experiment that would validate it.</li>
+</ul>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pyramid complete for both systems</td>
+<td>10</td>
+<td>Each system has ≥8 metrics correctly placed across all 4 layers</td>
+</tr>
+<tr>
+<td>Each metric has all four attributes</td>
+<td>8</td>
+<td>Calculation, owner (named role), frequency, and decision threshold present for every metric</td>
+</tr>
+<tr>
+<td>Causal links classified, assumptions surfaced</td>
+<td>7</td>
+<td>Every adjacent link labeled; ≥2 links per system labeled Assumed with a stated validating experiment</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-2-unit-economics-25-points">Task 2 — Unit Economics (25 points)</h3>
+<p>All four parts. Every figure traces to <code>docs/lab7-cost-model.csv</code>.</p>
+<p><strong>2a. Pull the rate card (5 points)</strong></p>
+<p>Use <code>aws pricing get-products</code> to retrieve the current published rate for <strong>at least four</strong> resources your platform actually uses. Show the command and the returned price dimension for each, including the <code>description</code> field.</p>
+<p>State the date you pulled it. AWS prices change; a rate card without a date is not a rate card.</p>
+<p><strong>2b. Cost per 1,000 predictions — churn model (8 points)</strong></p>
+<p>Compute the fully-loaded cost per prediction for the churn model <strong>at NorthStar production scale</strong>: 2.1M active customers scored daily.</p>
+<p>Four components, all required:</p>
+<ul>
+<li><strong>Inference compute</strong> — as architected in Labs 5–6, i.e. a persistent real-time endpoint</li>
+<li><strong>Amortized training</strong> — training cost ÷ predictions served over the model's lifetime</li>
+<li><strong>Feature Store online reads</strong> — one read per prediction</li>
+<li><strong>Data pipeline allocated to churn</strong> — Glue ETL and crawler cost, divided across the models the pipeline serves</li>
+</ul>
+<p>Present the result as <strong><code>$X.XXX per 1,000 predictions</code></strong> and show the arithmetic.</p>
+<blockquote>
+<p>The measured Glue DPU-hours in your inputs come from a 19,500-row lab dataset. NorthStar is not that size. <strong>Derive your scale factor from the case</strong> — annual revenue and average order value give you transaction volume — and state it. A cost model that silently applies lab-scale pipeline cost to a 2.1M-customer business is off by more than an order of magnitude.</p>
+<p>One component may legitimately come out at or near zero. If it does, <strong>say why in one sentence.</strong> The reference implementation trains locally rather than on SageMaker, which does not make training free — it moves the cost into a category that does not appear on any AWS bill. Naming a cost you moved rather than eliminated is the point of the exercise.</p>
+</blockquote>
+<p><strong>2c. Total platform cost (7 points)</strong></p>
+<p>Estimate the monthly cost of the full NorthStar platform — all three AI systems — across six categories:</p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Monthly Cost ($)</th>
+<th>Stated Assumption</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Compute (training)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Compute (inference)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Data pipeline, storage and transfer</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Third-party APIs and services (Bedrock)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Human labor (estimate at $80/hr)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Platform and tooling</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Pipeline compute (Glue) belongs in <strong>row 3</strong>, not in either compute row. The six-category taxonomy from the chapter splits compute by <em>model</em> lifecycle stage and treats the data platform as one line. Put it wherever you like, but put it somewhere, exactly once, and say where.</p>
+</blockquote>
+<p>Compare your total against NorthStar's stated <strong>$85,000/month</strong> AI platform budget. If your total is a small fraction of the budget, that is a finding, not an error — report it and say what it implies about which decisions actually matter.</p>
+<p><strong>2d. One cost optimization (5 points)</strong></p>
+<p>Identify <strong>one specific</strong> optimization, quantify it, and state the tradeoff you accept.</p>
+<p>Quantified means: the current cost, the optimized cost, the dollar and percentage saving, and the arithmetic connecting them.</p>
+<p>The tradeoff must be <strong>operational, not rhetorical.</strong> "Slightly less flexible" is not a tradeoff. If your optimization changes the serving architecture, check it against the four SLOs you wrote in Lab 6 and say which of them survive it. Some optimizations on this platform invalidate an SLO you already committed to; finding that out here is much cheaper than finding it out in production.</p>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rate card pulled from the API with dates</td>
+<td>5</td>
+<td>≥4 resources, command shown, <code>description</code> field reproduced, date stated</td>
+</tr>
+<tr>
+<td>Cost per 1,000 predictions, all 4 components</td>
+<td>8</td>
+<td>Arithmetic shown; scale factor for the pipeline derived and stated; any zero component explained</td>
+</tr>
+<tr>
+<td>Six-category platform cost with assumptions</td>
+<td>7</td>
+<td>Every row has a figure and a stated assumption; total compared to the $85K budget; <code>lab7-cost-model.csv</code> present and sums to the stated total</td>
+</tr>
+<tr>
+<td>Optimization specific, quantified, tradeoff real</td>
+<td>5</td>
+<td>Names a specific AWS feature or architecture change; before/after arithmetic; tradeoff checked against Lab 6 SLOs</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-3-executive-value-scorecard-25-points">Task 3 — Executive Value Scorecard (25 points)</h3>
+<p>Produce a one-page scorecard in Section 3. Audience: <strong>Maya Chen (CDO) and Robert Hess (CFO).</strong> No ML metrics. No AUC, no PSI, no recall. Write for a business reader who controls the budget.</p>
+<p><strong>Required structure:</strong></p>
+<pre><code class="language-markdown">## NorthStar AI Platform — Q4 2026 Value Scorecard
+
+### Platform Summary
+[2-3 sentences: what the platform does and why it was built]
+
+### Systems in Production
+| System | Business Metric | Current Performance | vs. Target | Status |
+|--------|----------------|---------------------|------------|--------|
+| Churn Prediction | | | | On Track / Watch / Action Required |
+| [Second system] | | | | |
+
+### Can We Hit the Stated Target?
+[Required. See below.]
+
+### Attribution
+[How would business impact be measured? What is the counterfactual?
+What is your confidence level and why?]
+
+### Investment Recommendation
+| System | Recommendation | Rationale |
+|--------|----------------|-----------|
+| Churn Prediction | Expand / Hold / Redesign / Decommission | |
+| [Second system] | | |
+
+### Open Questions
+[What measurement gaps remain? What experiments would close them?]
+</code></pre>
+<p><strong>The "Can We Hit the Stated Target?" section is the heart of this task.</strong></p>
+<p>The CDO's stated success metric for churn prediction is: <strong>reduce the annual churn rate from 18% to 14% within one year of deployment.</strong> The retention program contacts only the <strong>top 10% highest-risk customers</strong>.</p>
+<p>Work out what that target actually requires, given the model you measured:</p>
+<ul>
+<li>How many customers must be retained per year to move the rate by 4 percentage points?</li>
+<li>How many at-risk customers does the model actually place in the contactable top decile, at its measured Recall@10%?</li>
+<li>Therefore, what fraction of contacted customers must the retention offer save?</li>
+<li>Is that fraction achievable? Compare it to a stated, sourced benchmark for retention-offer effectiveness.</li>
+<li>If it is not achievable, what <em>is</em> achievable — and what would have to change (model recall, decile coverage, offer conversion) to close the gap?</li>
+</ul>
+<p>Then tell the CDO, in the scorecard, in plain language. <strong>A scorecard that reports the target as "on track" without doing this arithmetic has failed the task</strong>, regardless of how well written it is.</p>
+<p>You are not being asked to condemn the platform. A system can be a strong investment and still miss a target that was set before anyone measured the model. Reporting both, clearly, is the job.</p>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Target feasibility computed and reported honestly</td>
+<td>10</td>
+<td>Required save rate derived from measured recall and shown; compared to a sourced benchmark; verdict stated plainly; achievable alternative quantified if the target is not reachable</td>
+</tr>
+<tr>
+<td>Readable by a non-technical executive</td>
+<td>8</td>
+<td>No ML term appears without plain-language translation; no AUC, PSI, recall, or drift vocabulary in Section 3</td>
+</tr>
+<tr>
+<td>Attribution method explicitly stated</td>
+<td>7</td>
+<td>Names the specific method (randomized holdout, A/B test, difference-in-differences), states the counterfactual, states confidence level with a reason</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-4-value-methodology-note-15-points">Task 4 — Value Methodology Note (15 points)</h3>
+<p>Write a complete value methodology note for <strong>one</strong> NorthStar AI system, in Section 4. <strong>All 13 fields.</strong> No blanks, no "TBD."</p>
+<pre><code class="language-markdown">## Value Methodology Note: [System Name]
+
+| Field | Value |
+|-------|-------|
+| 1. System name | |
+| 2. Business objective | |
+| 3. Value dimension (efficiency / revenue / risk / experience) | |
+| 4. Primary metric | |
+| 5. Guardrail metrics (&gt;=2) | |
+| 6. Attribution method | |
+| 7. Counterfactual | |
+| 8. Measurement window | |
+| 9. Time to observe outcome | |
+| 10. Confidence level (Low / Medium / High) | |
+| 11. Known confounders | |
+| 12. Financial conversion logic | |
+| 13. Metric owner and review cadence | |
+</code></pre>
+<p>Two fields carry most of the weight:</p>
+<ul>
+<li><strong>Counterfactual (7)</strong> must describe what happens <em>without</em> the AI system in operational terms. "Nothing" and "no AI" are not counterfactuals. "The retention team manually segments on days-since-last-purchase greater than 60, which surfaces roughly X% of the churners the model finds" is one.</li>
+<li><strong>Time to observe outcome (9)</strong> is <strong>90 days</strong>, because that is the label. If your measurement window in field 8 is shorter than field 9, your methodology reports results before the outcome exists. Say how you handle the gap.</li>
+</ul>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All 13 fields completed substantively</td>
+<td>10</td>
+<td>No field blank, "TBD," or a restatement of its own label</td>
+</tr>
+<tr>
+<td>Counterfactual and outcome timing are specific and consistent</td>
+<td>5</td>
+<td>Counterfactual describes concrete current-state behavior; measurement window is reconciled against the 90-day label</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-5-measurement-reflection-10-points">Task 5 — Measurement Reflection (10 points)</h3>
+<p>Roughly 300 words in Section 5.</p>
+<ol>
+<li>What are the <strong>two weakest measurement assumptions</strong> in your metric pyramid? Name the specific causal link, not "the model might be wrong."</li>
+<li>For each: what experiment validates or invalidates it? State what you measure, the population, the duration, and the success criterion. A sample-size or power sketch earns full credit; an experiment with no n is an idea, not a design.</li>
+<li>Which pyramid layer is <strong>least observed</strong> in the platform as built? What specific data is missing, what engineering would capture it, and how long would that take?</li>
+</ol>
+<p><strong>Rubric:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Points</th>
+<th>Pass Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Two weak assumptions named precisely</td>
+<td>5</td>
+<td>Each is a specific causal link between two named metrics, and is falsifiable</td>
+</tr>
+<tr>
+<td>Experiments are actionable</td>
+<td>5</td>
+<td>Each states metric, population, duration, and success criterion</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="traps-already-mapped-do-not-rediscover">Traps Already Mapped — do not rediscover</h2>
+<ol>
+<li><strong>Cost Explorer will report $0.00 for a month in which you ran the entire platform.</strong> Free tier absorbs it. Use <code>--metrics UsageQuantity</code>, never <code>UnblendedCost</code>, and build dollars from the rate card.</li>
+<li><strong>Cost Explorer takes up to 24 hours to prepare data after first activation.</strong> Enable it the day before, not the hour before.</li>
+<li><strong>An IAM user may be denied billing data</strong> until the root user activates IAM access to billing. You cannot fix this from the IAM user, and it is not a permissions policy you can attach.</li>
+<li><strong>The <code>pricing</code> API endpoint exists only in <code>us-east-1</code> and <code>ap-south-1</code>.</strong> <code>--region</code> selects the endpoint; the <code>regionCode</code> filter selects what you are pricing. They are different things.</li>
+<li><strong>The Price List API returns one pricing tier and does not tell you it is the wrong one.</strong> <code>CW:MetricMonitorUsage</code> returns $0.02 (the over-1M-metrics tier) when your actual rate is $0.30. Always read the <code>description</code> field.</li>
+<li><strong>Bedrock output-token prices are absent from the Price List API</strong> in us-east-1, and its Claude model coverage is stale. Use the pricing page and cite the date.</li>
+<li><strong>Failed jobs bill.</strong> The reference account spent more instance time on one analyzer run that ran out of memory (13 min 42 s) than on the one that succeeded (5 min 45 s). Cost models built from successful runs are optimistic by construction.</li>
+<li><strong>The 18%/year case figure and the 22.0% dataset figure are not the same quantity.</strong> Different population, different window. Mixing them produces confident nonsense.</li>
+<li><strong>The churn label looks forward 90 days; several features look back 30.</strong> They sit in the same feature table and are easy to conflate. Any measurement window shorter than 90 days reports outcomes that have not happened yet.</li>
+<li><strong><code>ModelLatency</code> is in microseconds</strong> (carried from Lab 6). If you cite latency in a cost or SLO context, cite the unit.</li>
+<li><strong>A real-time endpoint bills 24×7 for a daily batch workload.</strong> Both Lab 5 and Lab 6 built one, deliberately, because they were teaching deployment and monitoring. Whether that is the right architecture for <em>this</em> workload is a Task 2d question, and it has a large answer.</li>
+<li><strong>Recall@10% is capped near 0.45</strong> by the base rate and the decile constraint — you cannot retrieve more churners than fit in the 10% of the population you are allowed to contact. Any business projection implying recall above that ceiling is arithmetically impossible, not merely optimistic.</li>
+</ol>
+<h2 id="teardown">Teardown</h2>
+<p><strong>Lab 7 creates nothing.</strong> But it is the last lab, and the teardown gate from Labs 2–6 still applies to everything you built earlier.</p>
+<p>Before you submit, run the all-region sweep one final time and confirm the account is clean:</p>
+<pre><code class="language-bash">bash scripts/teardown-lab6.sh    # idempotent; safe to run when nothing is left
+</code></pre>
+<p>Then confirm independently, in every region you have ever touched, that there are no:</p>
+<ul>
+<li>SageMaker endpoints, endpoint configs, or models</li>
+<li>Monitoring schedules or in-flight processing jobs</li>
+<li>Application Auto Scaling scalable targets</li>
+<li>CloudWatch anomaly detectors <em>(these survive <code>terraform destroy</code> — check for them explicitly)</em></li>
+<li>NAT gateways or unattached Elastic IPs</li>
+</ul>
+<p><strong>An endpoint still running after the semester deadline is a 10-point deduction on this lab</strong>, on top of whatever it costs you. Custom CloudWatch metrics cannot be deleted and expire after 15 months of no data; that is expected and already accounted for.</p>
+<h2 id="final-notes">Final Notes</h2>
+<p><strong>The platform you built across these seven labs covers:</strong></p>
+<ul>
+<li>Infrastructure as Code on AWS (Lab 1)</li>
+<li>Production data pipelines and a feature store (Lab 2)</li>
+<li>Three AI system types: traditional ML, RAG/LLM, and agentic (Lab 3)</li>
+<li>Automated model lifecycle with CI/CD and testing (Lab 4)</li>
+<li>Production deployment with canary rollout, rollback, and security documentation (Lab 5)</li>
+<li>Five-layer monitoring, SLOs, error budgets, and incident runbooks (Lab 6)</li>
+<li>Economic analysis and business value measurement (Lab 7)</li>
+</ul>
+<p>If you take one thing from Lab 7, take this: <strong>the cost side of an AI business case can be computed to three decimal places, and the value side usually rests on a single parameter nobody has measured.</strong> In this platform, the entire ROI turns on the retention offer's save rate — a number that appears in no dashboard, no model card, and no AWS bill. The engineering discipline that matters most at this level is knowing which of your numbers are measured and which are assumed, and never letting the second kind be mistaken for the first.</p>
+<p><strong>The team project</strong> extends this platform with AI governance, closing-the-loop feedback mechanisms, and a new AI system of your team's choosing. Use the NorthStar platform as your architecture reference.</p>
+<p><strong>Academic integrity:</strong> You may discuss lab approaches with classmates, but the code, documentation, and analysis you submit must be your own. Submitting another student's code, even partially, is a violation of the BYU Honor Code.</p>
+</body></html>
