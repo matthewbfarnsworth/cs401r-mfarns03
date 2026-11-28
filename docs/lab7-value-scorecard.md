@@ -126,3 +126,107 @@ Handle time for escalated contacts         (Business Outcome)
 | Escalation correctness -> CSAT for AI-handled contacts | Assumed | Correctly routed contacts leave customers more satisfied. CSAT is not collected for agent contacts | In the same 4-week stricter-escalation test, which changes correctness, compare audit correctness and CSAT between the two groups |
 | CSAT for AI-handled contacts -> Routine contact automation rate | Assumed | Unhappy customers ask for a human on their next contact instead of using the agent. Neither metric is measured | For 4 weeks, randomly assign contacts to the current prompt or a variant meant to raise CSAT. Compare the share of each group's next routine contacts that the agent resolves without a human |
 | Seven-day repeat contact rate -> Cost per contact | Assumed | Each repeat contact is another contact to pay for, so a higher repeat rate raises cost per resolved issue. Neither metric is measured | In the same 4-week stricter-escalation test, which changes repeat contacts, compare cost per resolved issue between the two groups, counting repeat contacts |
+
+## 2. Unit Economics
+
+Every figure is a row in `docs/lab7-cost-model.csv`. Usage comes from Cost Explorer UsageQuantity (October and November 2026) and job logs; dollars are usage × rate, not the invoice.
+
+### 2a. Rate card
+
+Price List API, pulled 2026-11-28 UTC, one call per resource (usagetype varies); all seven below have effectiveDate 2026-11-01.
+
+```bash
+aws pricing get-products --service-code AmazonSageMaker --region us-east-1 \
+  --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' \
+            'Type=TERM_MATCH,Field=usagetype,Value=USE1-Host:ml.t2.medium' \
+  --query 'PriceList' --output json
+```
+
+Each row below uses this same command with that row's service code and usagetype, for example `--service-code AWSGlue` with `Value=USE1-ETL-DPU-Hour`, or `--service-code AmazonCloudWatch` with `Value=CW:MetricMonitorUsage`.
+
+| Resource | Service code | usagetype | Rate (USD) | `description` returned |
+|---|---|---|---|---|
+| SageMaker hosting, ml.t2.medium | AmazonSageMaker | `USE1-Host:ml.t2.medium` | 0.056 per hour | $0.056 per Hosting ml.t2.medium hour in US East (N. Virginia) |
+| SageMaker training, ml.g5.xlarge | AmazonSageMaker | `USE1-Train:ml.g5.xlarge` | 1.408 per hour | $1.408 per Training ml.g5.xlarge hour in US East (N. Virginia) |
+| Feature Store read request units | AmazonSageMaker | `USE1-FeatureStore:ReadRequestUnits` | 0.00000025 per unit | $0.25 per million SageMaker Feature Store read request units in US East (N. Virginia) |
+| Glue ETL job | AWSGlue | `USE1-ETL-DPU-Hour` | 0.44 per DPU-hour | $0.44 per Data Processing Unit-Hour for AWS Glue ETL job |
+| Glue crawler | AWSGlue | `USE1-Crawler-DPU-Hour` | 0.44 per DPU-hour | $0.44 per Data Processing Unit-Hour for AWS Glue crawler |
+| SageMaker batch transform, ml.m5.large | AmazonSageMaker | `USE1-Tsform:ml.m5.large` | 0.115 per hour | $0.115 per BatchTransform Job ml.m5.large hour in US East (N. Virginia) |
+| CloudWatch custom metric | AmazonCloudWatch | `CW:MetricMonitorUsage` | 0.30 per metric-month | $0.30 per metric-month for the first 10,000 metrics - US East (Northern Virginia) |
+
+- CloudWatch: with 15 custom metrics, the $0.30 first-10,000 tier applies, not the $0.02 over-1,000,000 tier.
+- Bedrock: the rate comes from the Bedrock pricing page, read on 2026-11-28 UTC, because it is not in the Price List API. It is $1.10 per 1M input tokens and $5.50 per 1M output tokens for Claude Haiku 4.5 in US East (N. Virginia), and the agent uses the `us.` geo profile.
+- The full raw output for every rate is in `docs/lab7-rate-card.txt`.
+
+### 2b. Cost per 1,000 predictions (churn)
+
+A month is 365 / 12 = 30.4167 days or 4.3452 weeks; products use the unrounded values.
+
+| Scale input | Calculation | Value |
+|---|---|---|
+| Predictions per month | 2,100,000 customers × 30.4167 days | 63,875,000 (63,875 thousand) |
+| NorthStar transactions per year | 72% × $3.2B / $87 store AOV + 28% × $3.2B / $112 online AOV | 26.48M + 8.00M = 34.48M |
+| Lab dataset (own measured data, not the handout's 19,500 rows) | 163,255 transactions, 2025-04-01 to 2026-06-30 (15 months) | about 130,600 per year |
+| Full-history factor | 34.48M / 130,600 | about 264× |
+| Weekly incremental run | 34.48M / 52 = 663,077 transactions, / 163,255 | 4.06× one measured pass, applied to Glue below |
+
+Bridging assumption: the sampled dataset is not a random draw from NorthStar's customers, so costs that grow with customers (training, Feature Store) scale by 2.1M / 10,000 = 210×, and costs that grow with transactions (Glue, S3) scale by the case's 34.48M a year.
+
+| Component | Calculation | Monthly ($) | Per 1,000 ($) |
+|---|---|---|---|
+| Inference | 2 × ml.t2.medium (99.5% availability SLO) × 730 hr × $0.056 | 81.76 | 0.00128 |
+| Amortized training | Per run: 0.02477 hr per 10,000 customers × 210 = 5.20 hr, × $1.408 = $7.32<br>Monthly: $7.32 × 4.3452 runs<br>Per 1,000: $7.32 / 14,700 thousand predictions per model (2.1M × 7 days) | 31.82 | 0.000498 |
+| Feature Store reads | 63,875,000 reads × $0.25 / 1M (one unit per read, records under 4 KB) | 15.97 | 0.000250 |
+| Data pipeline, churn share | ETL: 574 to 594 DPU-s × 4.06 / 3,600<br>Crawler: 0.0784 to 0.1269 DPU-hr × 4.06<br>Monthly cost: both × $0.44 × 4.3452 = $1.847 to $2.267<br>Churn share: × 50%, since the pipeline is shared with offer generation | 0.92 to 1.13 | 0.000014 to 0.000018 |
+| Total | | 130.48 to 130.69 | 0.00204 to 0.00205 |
+
+- Training is not free. It is a billed SageMaker job, and its time is assumed to grow linearly with the number of rows.
+- Glue time is also assumed to grow linearly with transactions. This slightly overstates cost because part of each run is fixed startup time.
+- The pipeline share is near zero because each weekly run covers only one week of new transactions, and that cost is split across two models.
+- The measured runs were noisy: ETL passes differ by 3.5% and crawler runs by 62%. That moves the result by only $0.00001 per 1,000 predictions, so the conclusion does not depend on it.
+
+The churn model costs $0.002 per 1,000 predictions ($0.00204 to $0.00205); the endpoint is 63% of it.
+
+### 2c. Total platform cost (all three systems)
+
+This table uses the high end of the 2b pipeline range, and the CSV lists every line item. The six categories sum to the total, and `derived_not_in_total` rows are excluded.
+
+| Category | Monthly cost ($) | Assumption |
+|---|---|---|
+| Compute (training) | 31.82 | Churn weekly retrain; the two LLM systems use hosted Claude Haiku 4.5, no training |
+| Compute (inference) | 1,846.70 | Churn endpoint; AgentCore for 425,833 sessions (14,000 contacts/day) and 912,500 offers (top 10% weekly), measured per-session use. Runtime per session is averaged over all 74 invocations Cost Explorer recorded, while tokens per session (below) are the mean of the 18 sessions in the agent cost log |
+| Data pipeline, storage and transfer | 62.70 | Glue (counted here only), Feature Store, S3, NAT gateway hours |
+| Third-party APIs (Bedrock) | 8,263.27 | 4,188 input / 285 output tokens per session (mean of 18 measured), same for offers |
+| Human labor ($80/hr) | 9,892.80 | 123.66 hr/month of review, audit and on-call |
+| Platform and tooling | 7.63 | CloudWatch alarms and metrics, CodeBuild, CodePipeline, drift job, KMS. The serverless MLflow App costs $0, which avoids the MLflow Tracking Server at $438/month ($0.60/hr × 730) |
+| Total | 20,104.91 | Sum of unrounded rows [1] |
+
+[1] Category figures are rounded to the cent, so their sum can differ from the total by one cent.
+
+The total is 23.65% of the $85,000/month budget, leaving $64,895.09. Labor (49%) and Bedrock (41%) dominate and churn ($130.69) is under 1%, so token volume, LLM traffic and staffing drive cost, not churn serving.
+
+### 2d. One cost optimization
+
+Replace the churn real-time endpoint (2 × ml.t2.medium, $81.76/month) with one daily batch transform on ml.m5.large. Measured 9,999 customers in 114 s plus 171 s startup; assumes linear scaling.
+
+| Step | Calculation | Result |
+|---|---|---|
+| Compute per day | 114 s × 2,100,000 / 9,999 | 23,942 s |
+| Billed time per day | 23,942 s + 171 s startup = 24,113 s | 6.698 hr |
+| Billed time per month | 6.698 hr × 30.4167 days | 203.74 hr |
+| Optimized cost | 203.74 hr × $0.115 | $23.43/month |
+| Saving | $81.76 − $23.43 | $58.33/month (71.3%) |
+| Inference per 1,000 predictions | $23.43 / 63,875 | $0.00037, down from $0.00128 |
+
+Only the inference saving is claimed. A measured failed job ran 35 minutes and billed about $0.067. A failure delays that day's scores, and the fallback is the previous day's scores.
+
+| SLO | Target | Survives? | Why |
+|---|---|---|---|
+| Availability | 99.5% of requests | No | No requests; replace with a daily delivery deadline |
+| Latency | p95 < 20 ms | No | No per-request latency; scores up to 24 hr old |
+| Prediction quality | Recall@10% ≥ 0.25, weekly sample | Yes | Same model and features |
+| Fairness | Recall gap across loyalty tiers ≤ 10 pp | Yes | Same model and features |
+
+The SLO error budgets were sized for 2.1M predictions a week. At 2.1M scored daily the percentage targets still hold, but the request counts in each budget would be recomputed, since they are about 7× larger.
+
+Tradeoff: no fresh single-customer score between runs, and two SLOs must be rewritten before shipping.

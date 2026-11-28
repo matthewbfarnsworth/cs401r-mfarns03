@@ -1,0 +1,108 @@
+# Rate card pulled 2026-11-28 with aws pricing get-products (endpoint --region us-east-1; priced region via regionCode=us-east-1).
+# Each block: the command, then usagetype | USD per unit | unit | effectiveDate | description for every OnDemand price dimension returned.
+
+## SageMaker real-time hosting, ml.t2.medium
+aws pricing get-products --service-code AmazonSageMaker --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-Host:ml.t2.medium' --query 'PriceList' --output json
+USE1-Host:ml.t2.medium | 0.0560000000 | Hrs | 2026-11-01T00:00:00Z | $0.056 per Hosting ml.t2.medium hour in US East (N. Virginia)
+
+## SageMaker training, ml.g5.xlarge
+aws pricing get-products --service-code AmazonSageMaker --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-Train:ml.g5.xlarge' --query 'PriceList' --output json
+USE1-Train:ml.g5.xlarge | 1.4080000000 | Hrs | 2026-11-01T00:00:00Z | $1.408 per Training ml.g5.xlarge hour in US East (N. Virginia)
+
+## SageMaker batch transform, ml.m5.large
+aws pricing get-products --service-code AmazonSageMaker --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-Tsform:ml.m5.large' --query 'PriceList' --output json
+USE1-Tsform:ml.m5.large | 0.1150000000 | Hrs | 2026-11-01T00:00:00Z | $0.115 per BatchTransform Job ml.m5.large hour in US East (N. Virginia)
+
+## SageMaker processing, ml.t3.medium
+aws pricing get-products --service-code AmazonSageMaker --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-Processing:ml.t3.medium' --query 'PriceList' --output json
+USE1-Processing:ml.t3.medium | 0.0500000000 | Hrs | 2026-11-01T00:00:00Z | $0.05 per Processing ml.t3.medium hour in US East (N. Virginia)
+
+## Feature Store read request units
+aws pricing get-products --service-code AmazonSageMaker --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-FeatureStore:ReadRequestUnits' --query 'PriceList' --output json
+USE1-FeatureStore:ReadRequestUnits | 0.0000002500 | ReadRequestUnits | 2026-11-01T00:00:00Z | $0.25 per million SageMaker Feature Store read request units in US East (N. Virginia)
+
+## Feature Store write request units
+aws pricing get-products --service-code AmazonSageMaker --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-FeatureStore:WriteRequestUnits' --query 'PriceList' --output json
+USE1-FeatureStore:WriteRequestUnits | 0.0000012500 | WriteRequestUnits | 2026-11-01T00:00:00Z | $1.25 per million SageMaker Feature Store write request units in US East (N. Virginia)
+
+## Feature Store online storage
+aws pricing get-products --service-code AmazonSageMaker --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-FeatureStore:TimedAndPITRStorage' --query 'PriceList' --output json
+USE1-FeatureStore:TimedAndPITRStorage | 0.4500000000 | GB-Mo | 2026-11-01T00:00:00Z | $0.45 per GB-Month of SageMaker Feature Store Storage in US East (N. Virginia)
+
+## Glue ETL job
+aws pricing get-products --service-code AWSGlue --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-ETL-DPU-Hour' --query 'PriceList' --output json
+USE1-ETL-DPU-Hour | 0.4400000000 | DPU-Hour | 2026-11-01T00:00:00Z | $0.44 per Data Processing Unit-Hour for AWS Glue ETL job
+
+## Glue Flex ETL job
+aws pricing get-products --service-code AWSGlue --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-ETL-Flex-DPU-Hour' --query 'PriceList' --output json
+USE1-ETL-Flex-DPU-Hour | 0.2900000000 | DPU-Hour | 2026-11-01T00:00:00Z | $0.29 per Data Processing Unit-Hour for AWS Glue Flex ETL job
+
+## Glue crawler
+aws pricing get-products --service-code AWSGlue --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-Crawler-DPU-Hour' --query 'PriceList' --output json
+USE1-Crawler-DPU-Hour | 0.4400000000 | DPU-Hour | 2026-11-01T00:00:00Z | $0.44 per Data Processing Unit-Hour for AWS Glue crawler
+
+## CloudWatch custom metric (tiered: read the description)
+aws pricing get-products --service-code AmazonCloudWatch --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=CW:MetricMonitorUsage' --query 'PriceList' --output json
+CW:MetricMonitorUsage | 0.1000000000 | Metrics | 2026-11-01T00:00:00Z | $0.10 per metric-month for the next 240,000 metrics - US East (Northern Virginia)
+CW:MetricMonitorUsage | 0.0500000000 | Metrics | 2026-11-01T00:00:00Z | $0.05 per metric-month for the next 750,000 metrics - US East (Northern Virginia)
+CW:MetricMonitorUsage | 0.3000000000 | Metrics | 2026-11-01T00:00:00Z | $0.30 per metric-month for the first 10,000 metrics - US East (Northern Virginia)
+CW:MetricMonitorUsage | 0.0200000000 | Metrics | 2026-11-01T00:00:00Z | $0.02 per metric-month  for over 1,000,000 metrics - US East (Northern Virginia)
+
+## CloudWatch standard alarm
+aws pricing get-products --service-code AmazonCloudWatch --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=CW:AlarmMonitorUsage' --query 'PriceList' --output json
+CW:AlarmMonitorUsage | 0.1000000000 | Alarms | 2026-11-01T00:00:00Z | $0.10 per alarm metric month (standard resolution) - US East (Northern Virginia)
+
+## CloudWatch composite alarm
+aws pricing get-products --service-code AmazonCloudWatch --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=CW:CompositeAlarmMonitorUsage' --query 'PriceList' --output json
+CW:CompositeAlarmMonitorUsage | 0.5000000000 | Alarms | 2026-11-01T00:00:00Z | $0.50 per composite alarm month - US East (Northern Virginia)
+
+## CloudWatch API requests
+aws pricing get-products --service-code AmazonCloudWatch --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=CW:Requests' --query 'PriceList' --output json
+CW:Requests | 0.0000100000 | Requests | 2026-11-01T00:00:00Z | $0.01 per 1,000 requests
+
+## S3 Standard storage
+aws pricing get-products --service-code AmazonS3 --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=TimedStorage-ByteHrs' --query 'PriceList' --output json
+TimedStorage-ByteHrs | 0.0220000000 | GB-Mo | 2026-11-01T00:00:00Z | $0.022 per GB - next 450 TB / month of storage used
+TimedStorage-ByteHrs | 0.0210000000 | GB-Mo | 2026-11-01T00:00:00Z | $0.021 per GB - storage used / month over 500 TB
+TimedStorage-ByteHrs | 0.0230000000 | GB-Mo | 2026-11-01T00:00:00Z | $0.023 per GB - first 50 TB / month of storage used
+
+## NAT gateway hours
+aws pricing get-products --service-code AmazonEC2 --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=NatGateway-Hours' --query 'PriceList' --output json
+NatGateway-Hours | 0.0450000000 | Hrs | 2026-11-01T00:00:00Z | $0.045 per NAT Gateway Hour
+
+## NAT gateway data processed
+aws pricing get-products --service-code AmazonEC2 --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=NatGateway-Bytes' --query 'PriceList' --output json
+NatGateway-Bytes | 0.0450000000 | GB | 2026-11-01T00:00:00Z | $0.045 per GB Data Processed by NAT Gateways
+
+## KMS requests
+aws pricing get-products --service-code awskms --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=us-east-1-KMS-Requests' --query 'PriceList' --output json
+us-east-1-KMS-Requests | 0.0000030000 | Requests | 2026-11-01T00:00:00Z | $0.03 per 10000 KMS requests in US East (N. Virginia)
+
+## CodeBuild general1.small
+aws pricing get-products --service-code CodeBuild --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-Build-Min:Linux:g1.small' --query 'PriceList' --output json
+USE1-Build-Min:Linux:g1.small | 0.0050000000 | minutes | 2026-08-01T00:00:00Z | AWS CodeBuild - Build minutes on build.general1.small - US East (Northern Virginia)
+
+## CodePipeline action minutes
+aws pricing get-products --service-code AWSCodePipeline --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-actionExecutionMinute' --query 'PriceList' --output json
+USE1-actionExecutionMinute | 0.0020000000 | minutes | 2026-07-01T00:00:00Z | $0.002 per action execution minute
+
+## AgentCore Runtime vCPU (consumption-based)
+aws pricing get-products --service-code AmazonBedrockAgentCore --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-Runtime:Consumption-based:vCPU' --query 'PriceList' --output json
+USE1-Runtime:Consumption-based:vCPU | 0.0895000000 | vCPU-Hours | 2026-11-28T00:00:00Z | $0.0895 per vCPU-Hour for Runtime:Consumption-based:vCPU in US East (N. Virginia)
+
+## AgentCore Runtime memory (consumption-based)
+aws pricing get-products --service-code AmazonBedrockAgentCore --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-Runtime:Consumption-based:Memory' --query 'PriceList' --output json
+USE1-Runtime:Consumption-based:Memory | 0.0094500000 | GB-Hours | 2026-11-28T00:00:00Z | $0.00945 per GB-Hour for Runtime:Consumption-based:Memory in US East (N. Virginia)
+
+## AgentCore Gateway invocations
+aws pricing get-products --service-code AmazonBedrockAgentCore --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-Gateway:Consumption-based:API-Invocations' --query 'PriceList' --output json
+USE1-Gateway:Consumption-based:API-Invocations | 0.0000050000 | Invocations | 2026-11-28T00:00:00Z | $0.000005 per Invocation for Gateway:Consumption-based:API-Invocations in US East (N. Virginia)
+
+## AgentCore Policy authorization invocations
+aws pricing get-products --service-code AmazonBedrockAgentCore --region us-east-1 --filters 'Type=TERM_MATCH,Field=regionCode,Value=us-east-1' 'Type=TERM_MATCH,Field=usagetype,Value=USE1-Policy:Consumption-based:Authorization-API-Invocations' --query 'PriceList' --output json
+USE1-Policy:Consumption-based:Authorization-API-Invocations | 0.0000250000 | Invocations | 2026-11-28T00:00:00Z | $0.000025 per Invocation for Policy:Consumption-based:Authorization-API-Invocations in US East (N. Virginia)
+
+## Bedrock token prices (not from the Price List API, per the handout)
+Source: https://aws.amazon.com/bedrock/pricing/ read 2026-11-28, Anthropic > On-Demand and Batch pricing > Geo and In-region Cross-region Inference, Region: US East (N. Virginia)
+Row as rendered: Claude 4.5 Haiku | $1.10 per 1M input tokens | $5.50 per 1M output tokens | batch $0.55 / $2.75 | cache write 5m $1.375, 1h $2.20 | cache read $0.11
+Global Cross-region Inference table, same page and region: Claude Haiku 4.5 | $1.00 input | $5.00 output (not used: the agent calls the us. geo inference profile)

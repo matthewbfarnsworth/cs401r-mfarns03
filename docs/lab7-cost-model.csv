@@ -1,0 +1,75 @@
+line_item,category,usage_quantity,unit,rate_usd,monthly_cost_usd,source,assumption
+Churn weekly retraining (SageMaker ml.g5.xlarge),compute_training,22.6026,training hours,1.408,31.8245,Price List API 2026-11-28 USE1-Train:ml.g5.xlarge; measured job log,"0.02477 hr per 10,000 customers x 210 per run x 4.3452 runs; linear in rows"
+Offer generation training,compute_training,0,training hours,0,0,case,Hosted foundation model; not trained
+Customer service agent training,compute_training,0,training hours,0,0,case,Hosted foundation model; not trained
+Churn real-time endpoint (2 x ml.t2.medium),compute_inference,1460,instance hours,0.056,81.76,Price List API 2026-11-28 USE1-Host:ml.t2.medium,Two instances for 99.5% availability SLO; 730 hr each
+Agent AgentCore Runtime vCPU,compute_inference,2382.816,vCPU-hours,0.0895,213.262,Price List API 2026-11-28 USE1-Runtime:Consumption-based:vCPU; measured job log,"14,000 contacts/day x 30.4167 sessions; 0.4140784 vCPU-hr / 74 per session"
+Agent AgentCore Runtime memory,compute_inference,36427.8984,GB-hours,0.00945,344.2436,Price List API 2026-11-28 USE1-Runtime:Consumption-based:Memory; measured job log,6.33032755 GB-hr / 74 per session
+Agent AgentCore Gateway invocations,compute_inference,425833.3333,invocations,0.000005,2.1292,Price List API 2026-11-28 USE1-Gateway:Consumption-based:API-Invocations,One per session
+Agent AgentCore Policy authorization,compute_inference,425833.3333,invocations,0.000025,10.6458,Price List API 2026-11-28 USE1-Policy:Consumption-based:Authorization-API-Invocations,One per session
+Offer generation AgentCore Runtime vCPU,compute_inference,5106.0343,vCPU-hours,0.0895,456.9901,Price List API 2026-11-28 USE1-Runtime:Consumption-based:vCPU; case,"210,000 offers/week (top 10%) x 4.3452; agent's per-session use"
+Offer generation AgentCore Runtime memory,compute_inference,78059.7823,GB-hours,0.00945,737.6649,Price List API 2026-11-28 USE1-Runtime:Consumption-based:Memory; case,Agent's per-session use
+"Glue ETL (transform + feature-engineer), weekly incremental",data_pipeline_storage_transfer,2.912,DPU-hours,0.44,1.2813,Price List API 2026-11-28 USE1-ETL-DPU-Hour; Cost Explorer UsageQuantity 2026-11,High end: 594 DPU-s x 4.06 x 4.3452; whole pipeline; Glue counted here only
+"Glue crawler, weekly incremental",data_pipeline_storage_transfer,2.2396,DPU-hours,0.44,0.9854,Price List API 2026-11-28 USE1-Crawler-DPU-Hour; Cost Explorer UsageQuantity 2026-11,High end: 0.1269 DPU-hr x 4.06 x 4.3452; whole pipeline
+Feature Store online reads (churn),data_pipeline_storage_transfer,63875000,read request units,0.00000025,15.9688,Price List API 2026-11-28 USE1-FeatureStore:ReadRequestUnits,One unit per prediction (records under 4 KB)
+Feature Store writes,data_pipeline_storage_transfer,9125000,write request units,0.00000125,11.4063,Price List API 2026-11-28 USE1-FeatureStore:WriteRequestUnits,One per customer per weekly run
+Feature Store online storage,data_pipeline_storage_transfer,0.3117,GB-months,0.45,0.1403,Price List API 2026-11-28 USE1-FeatureStore:TimedAndPITRStorage; Cost Explorer UsageQuantity 2026-11,Measured 0.00148421 GB-month x 210
+S3 Standard storage,data_pipeline_storage_transfer,2.8106,GB-months,0.023,0.0646,Price List API 2026-11-28 TimedStorage-ByteHrs; Cost Explorer UsageQuantity 2026-11,Measured 0.01064632 GB-month x 264; first 50 TB tier
+NAT gateway hours,data_pipeline_storage_transfer,730,hours,0.045,32.85,Price List API 2026-11-28 NatGateway-Hours,Transfer charge; per-GB not modeled (under 0.03 GB measured)
+Agent Bedrock input tokens (Claude Haiku 4.5),third_party_apis_bedrock,1783.39,million input tokens,1.1,1961.729,Bedrock pricing page 2026-11-28,"4,188 per session (mean of 18 measured); us. geo profile"
+Agent Bedrock output tokens (Claude Haiku 4.5),third_party_apis_bedrock,121.3625,million output tokens,5.5,667.4938,Bedrock pricing page 2026-11-28,285 per session (mean of 18 measured)
+Offer generation Bedrock input tokens (Claude Haiku 4.5),third_party_apis_bedrock,3821.55,million input tokens,1.1,4203.705,Bedrock pricing page 2026-11-28,"4,188 per offer (agent's mean)"
+Offer generation Bedrock output tokens (Claude Haiku 4.5),third_party_apis_bedrock,260.0625,million output tokens,5.5,1430.3437,Bedrock pricing page 2026-11-28,285 per offer (agent's mean)
+Weekly churn review,human_labor,8.69,hours,80,695.2,estimate,2 hr/week
+Weekly retrain and promotion-gate review,human_labor,13.04,hours,80,1043.2,estimate,3 hr/week
+Fairness and tier-gap review at each retrain,human_labor,4.35,hours,80,348,estimate,1 hr/week
+Escalation audit of 100 contacts,human_labor,21.73,hours,80,1738.4,estimate,"3 min per contact, 5 hr/week"
+CSAT and transcript review,human_labor,8.69,hours,80,695.2,estimate,2 hr/week
+Release-candidate A/B evaluation,human_labor,4,hours,80,320,estimate,4 hr/month
+Holdout incremental-retention analysis,human_labor,4,hours,80,320,estimate,4 hr/month
+Quarterly churn and automation checkpoints,human_labor,2.67,hours,80,213.6,estimate,8 hr/quarter
+Offer content and compliance review,human_labor,13.04,hours,80,1043.2,estimate,3 hr/week
+On-call and pipeline maintenance (all three systems),human_labor,43.45,hours,80,3476,estimate,10 hr/week
+CloudWatch standard alarms,platform_tooling,11,alarm metrics,0.1,1.1,Price List API 2026-11-28 CW:AlarmMonitorUsage,8 alarms; one math expression uses 4 metrics
+CloudWatch composite alarms,platform_tooling,3,composite alarms,0.5,1.5,Price List API 2026-11-28 CW:CompositeAlarmMonitorUsage,Configured
+CloudWatch custom metrics,platform_tooling,15,metrics,0.3,4.5,Price List API 2026-11-28 CW:MetricMonitorUsage,"DriftDetected, ViolationCount, 11 per-feature drift, ChurnAlertVolume, ChurnAlertVolumeChangePct; first-10,000 tier"
+CloudWatch API requests,platform_tooling,9108,requests,0.00001,0.0911,Price List API 2026-11-28 CW:Requests; Cost Explorer UsageQuantity 2026-11,Measured
+CodeBuild build minutes,platform_tooling,61.3982,build minutes,0.005,0.307,Price List API 2026-11-28 USE1-Build-Min:Linux:g1.small; measured job log,One build per weekly retrain; 14.13 min measured
+CodePipeline action minutes,platform_tooling,60.1091,action minutes,0.002,0.1202,Price List API 2026-11-28 USE1-actionExecutionMinute; measured job log,83 action-minutes over 6 measured runs
+Weekly drift job (Evidently on SageMaker Processing ml.t3.medium),platform_tooling,0.1436,processing hours,0.05,0.0072,Price List API 2026-11-28 USE1-Processing:ml.t3.medium; measured job log,1 min 59 s per run
+KMS requests,platform_tooling,293,requests,0.000003,0.0009,Price List API 2026-11-28 us-east-1-KMS-Requests; Cost Explorer UsageQuantity 2026-11,Measured
+MLflow App (serverless experiment tracking),platform_tooling,0,apps,0,0,measured job log,No hourly charge
+Churn training cost per run,derived_not_in_total,5.2017,training hours,1.408,7.324,Price List API 2026-11-28 USE1-Train:ml.g5.xlarge,Per run
+"Glue ETL monthly, low end",derived_not_in_total,2.814,DPU-hours,0.44,1.2381,Price List API 2026-11-28 USE1-ETL-DPU-Hour,574 DPU-s x 4.06 x 4.3452
+"Glue crawler monthly, low end",derived_not_in_total,1.3837,DPU-hours,0.44,0.6088,Price List API 2026-11-28 USE1-Crawler-DPU-Hour,0.0784 DPU-hr x 4.06 x 4.3452
+"Data pipeline monthly total, low end",derived_not_in_total,,,,1.847,derived,ETL + crawler
+"Data pipeline monthly total, high end",derived_not_in_total,,,,2.2667,derived,ETL + crawler
+"Data pipeline allocated to churn (50%), low end",derived_not_in_total,,,0.5,0.9235,derived,Shared with offer generation
+"Data pipeline allocated to churn (50%), high end",derived_not_in_total,,,0.5,1.1334,derived,Shared with offer generation
+"Churn monthly total, low end",derived_not_in_total,,,,130.48,derived,"Sum of unrounded components"
+"Churn monthly total, high end",derived_not_in_total,,,,130.69,derived,"Sum of unrounded components"
+"Per 1,000 predictions: inference",derived_not_in_total,63875,thousand predictions,,0.00128,derived,"Endpoint / 63,875"
+"Per 1,000 predictions: amortized training",derived_not_in_total,63875,thousand predictions,,0.0004982,derived,"Per run / 14,700 thousand predictions per model"
+"Per 1,000 predictions: Feature Store reads",derived_not_in_total,63875,thousand predictions,,0.00025,derived,"Reads / 63,875"
+"Per 1,000 predictions: churn pipeline share, low end",derived_not_in_total,63875,thousand predictions,,0.0000145,derived,"Share / 63,875"
+"Per 1,000 predictions: churn pipeline share, high end",derived_not_in_total,63875,thousand predictions,,0.0000177,derived,"Share / 63,875"
+"Per 1,000 predictions: churn total, low end",derived_not_in_total,63875,thousand predictions,,0.0020426,derived,"Churn monthly / 63,875"
+"Per 1,000 predictions: churn total, high end",derived_not_in_total,63875,thousand predictions,,0.0020459,derived,"Churn monthly / 63,875"
+Category subtotal: compute_training,derived_not_in_total,,,,31.8245,derived,Sum of category rows
+Category subtotal: compute_inference,derived_not_in_total,,,,1846.6956,derived,Sum of category rows
+Category subtotal: data_pipeline_storage_transfer,derived_not_in_total,,,,62.6967,derived,Sum of category rows
+Category subtotal: third_party_apis_bedrock,derived_not_in_total,,,,8263.2715,derived,Sum of category rows
+Category subtotal: human_labor,derived_not_in_total,,,,9892.8,derived,Sum of category rows
+Category subtotal: platform_tooling,derived_not_in_total,,,,7.6264,derived,Sum of category rows
+Platform monthly total,derived_not_in_total,,,,20104.9147,derived,Six categories
+NorthStar AI platform budget,derived_not_in_total,,,,85000,case,Monthly
+Budget headroom,derived_not_in_total,,,,64895.0853,derived,Budget - total
+Optimized churn inference: daily batch transform ml.m5.large,derived_not_in_total,203.7359,instance hours,0.115,23.4296,Price List API 2026-11-28 USE1-Tsform:ml.m5.large; measured job log,"114 s per 9,999 customers scaled to 2.1M + 171 s startup, daily"
+Optimization saving,derived_not_in_total,,,,58.3304,derived,Endpoint - optimized
+"Per 1,000 predictions: optimized inference",derived_not_in_total,63875,thousand predictions,,0.0003668,derived,"Optimized / 63,875"
+Failed batch transform job cost,derived_not_in_total,0.5833,instance hours,0.115,0.0671,Price List API 2026-11-28 USE1-Tsform:ml.m5.large; measured job log,Measured 35 min
+MLflow Tracking Server alternative (avoided),derived_not_in_total,730,hours,0.6,438,MLflow Tracking Server price $0.60/hr,Not in total
+"CloudWatch custom metrics at the over-1,000,000 tier (not applicable)",derived_not_in_total,15,metrics,0.02,0.3,Price List API 2026-11-28 CW:MetricMonitorUsage,Wrong tier; not used
+NorthStar annual revenue (case input for pipeline scale factor),derived_not_in_total,,,,3200000000,case,"72% store, 28% online; not a monthly cost"
+Store average order value (case input),derived_not_in_total,,,,87,case,26.48M store transactions/year
+Online average order value (case input),derived_not_in_total,,,,112,case,8.00M online transactions/year
