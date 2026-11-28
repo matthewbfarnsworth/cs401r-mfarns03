@@ -97,7 +97,7 @@ Handle time for escalated contacts         (Business Outcome)
 
 | Metric | Calculation | Owner | Frequency | Decision rule | Current value |
 |---|---|---|---|---|---|
-| Escalation rate | Routine contacts (order status, returns, loyalty points) the agent hands to a human, divided by routine contacts it receives | VP of Customer Experience (Priya Nair) | Weekly | If more than 50% of routine contacts are escalated in a week, review the routing prompt and tool coverage | 0%, 0 of 4 routine scripted scenarios |
+| Escalation rate | Routine contacts the agent hands to a human, divided by routine contacts it receives | VP of Customer Experience (Priya Nair) | Weekly | If more than 50% of routine contacts are escalated in a week, review the routing prompt and tool coverage | 0%, 0 of 4 routine scripted scenarios |
 | Escalation correctness | Resolve or escalate decisions that match a human reviewer's judgement, on an audit of 100 sampled contacts | VP of Customer Experience (Priya Nair) | Weekly | If correctness falls below 95%, review the failed cases and fix the escalation rules involved | 100%, 12 of 12 scripted scenarios |
 
 #### User Experience
@@ -230,3 +230,75 @@ Only the inference saving is claimed. A measured failed job ran 35 minutes and b
 The SLO error budgets were sized for 2.1M predictions a week. At 2.1M scored daily the percentage targets still hold, but the request counts in each budget would be recomputed, since they are about 7× larger.
 
 Tradeoff: no fresh single-customer score between runs, and two SLOs must be rewritten before shipping.
+
+## 3. Executive Value Scorecard
+
+### NorthStar AI Platform — Q4 2026 Value Scorecard
+
+### Platform Summary
+
+NorthStar loses 18% of its 2.1M active customers a year, about $128.5M in lifetime value (2.1M × 18% × $340). A churn system flags each week the customers most likely to stop buying, so marketing can send them retention offers, and a customer service agent is built to answer routine contacts so staff handle the rest.
+
+### Systems in Production
+
+| System | Business Metric | Current Performance | vs. Target | Status |
+|---|---|---|---|---|
+| Churn Prediction | Annual churn rate | 18%. No measured change yet; results will come from the retention holdout (a randomly chosen group that gets no offer) | Target 14% within a year. Not reachable on current evidence (see below) | Watch |
+| Customer Service Agent | Routine automation rate (share of routine contacts resolved without a person) | Not deployed. In testing it resolved all 4 routine test cases without escalating | Target 50% of routine contacts | Watch |
+
+### Can We Hit the Stated Target?
+
+Verdict: the 14% target is not reachable within a year. It needs 69% of contacted leavers won back. The best result a 2018 published field study (Ascarza, below) reports is 16%; offers to the customers most likely to leave won back under 2%.
+
+| Step | Calculation | Result |
+|---|---|---|
+| Customers who must be kept each year | (18% − 14%) × 2.1M | 84,000 |
+| Customers who will leave in a year | 18% × 2.1M | 378,000 |
+| Leavers inside the contacted group | Our system places 32% of customers who leave into the top 10% it flags: 0.3212 × 378,000 | 121,414 |
+| Share of those leavers the offer must win back | 84,000 / 121,414 | 69% |
+
+The 32% came from a 10,000-customer sample over 90 days. This assumes it holds for a full year across all 2.1M customers, and treats a year's weekly contact lists as one top-10% group of 210,000.
+
+Ascarza, E. (2018), "Retention Futility: Targeting High-Risk Customers Might Be Ineffective," Journal of Marketing Research 55(1), reports randomized field experiments:
+
+| Setting | Customers offered | Churn without offer | Churn with offer | Leavers won back |
+|---|---|---|---|---|
+| Wireless provider | 10% most likely to leave (p. 88) | 95.3% | 93.7% | 1.7% |
+| Wireless provider | 10% most responsive to the offer (pp. 88–89) | 57.0% | 47.8% | 16.1% |
+| Membership organization | 10% most likely to leave (p. 89) | 79.4% | 82.7% | None; the offer increased leaving |
+
+The wireless study measured leaving 30 days after the offer. This assumes the same share of leavers is won back over NorthStar's 90-day window and across a full year.
+
+What is achievable:
+
+| Scenario | Customers kept | Annual churn |
+|---|---|---|
+| Offer wins back 1.7% (high-risk benchmark) | 2,038 | 17.9% |
+| Offer wins back 16.1% (best benchmark) | 19,597 | 17.1% |
+| Lever 1: better targeting. The system finds 45% of leavers in the top 10%, the most a top-10% list can hold when 22% of sampled customers leave within 90 days (perfect ranking; same sample-to-year assumption as above). At 16.1% win-back: | 27,455 | 16.7% |
+| Lever 2: contacting all 2.1M customers, if the 16.1% win-back held | 61,011 | 15.1% |
+
+A realistic one-year range is 17.1% to 17.9% annual churn, 0.1 to 0.9 points lower than today. This assumes the paper's win-back rates carry over to NorthStar's retail offers, and the 16.1% rate was achieved by targeting the customers most responsive to the offer, not the most at risk. Even contacting every customer would need 22% of leavers won back, above the best result the study reports (16.1%).
+
+For the CFO: each customer kept is worth $340 in lifetime value. 2,038 × $340 = $692,920 a year at the low benchmark, and 19,597 × $340 = $6,662,980 at the best. The 84,000-customer target would be worth $28,560,000. The churn system costs about $131 a month ($1,568 a year) in computing cost only. This excludes review labor and retention offer costs.
+
+### Attribution
+
+| System | Method | Counterfactual | Confidence and reason |
+|---|---|---|---|
+| Churn Prediction | Randomized holdout. Each week 10% of flagged customers are randomly held back and get no offer | The holdout's churn rate is what would have happened without the program. Customers kept = (holdout churn rate − contacted churn rate) × customers contacted, over 90 days | Low today, because no holdout results exist yet. High once a full 90-day window of results is in, because random assignment rules out other explanations |
+| Customer Service Agent | Randomized A/B assignment. Routine contacts are randomly split between the agent and human staff | The human-handled group's resolution rate, handle time and cost per contact | Low today, because the agent is not deployed. High once a pilot runs, for the same reason |
+
+### Investment Recommendation
+
+| System | Recommendation | Rationale |
+|---|---|---|
+| Churn Prediction | Hold | The value is not yet measured at NorthStar. Keep it running, measure what the holdout shows, and reset the 14% target |
+| Customer Service Agent | Hold | Costs about $5,950 a month: $3,200 computing and AI service usage plus $2,750 review labor. Its value is unknown because it is not deployed. Run a pilot on a random share of routine contacts, then decide whether to expand |
+
+### Open Questions
+
+| Question | Experiment that closes it |
+|---|---|
+| Does redeeming an offer actually keep a customer? | For one quarter, randomly send each contacted customer either the offer or a contact with no offer, and compare how many stay after 90 days |
+| Does the agent routing a contact correctly lead to a more satisfied customer? | For 4 weeks, randomly give half of routine contacts a stricter rule for passing to staff, then compare audited correctness and satisfaction scores |
