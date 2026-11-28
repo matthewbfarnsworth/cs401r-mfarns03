@@ -286,7 +286,7 @@ For the CFO: each customer kept is worth $340 in lifetime value. 2,038 × $340 =
 
 | System | Method | Counterfactual | Confidence and reason |
 |---|---|---|---|
-| Churn Prediction | Randomized holdout. Each week 10% of flagged customers are randomly held back and get no offer | The holdout's churn rate is what would have happened without the program. Customers kept = (holdout churn rate − contacted churn rate) × customers contacted, over 90 days | Low today, because no holdout results exist yet. High once a full 90-day window of results is in, because random assignment rules out other explanations |
+| Churn Prediction | Randomized holdout. Each week 10% of flagged customers are randomly held back and get no offer. A second randomized test splits customers into two groups: one ranked by the system, one ranked by days since last purchase. Each group's top 10% is contacted, and leaving is compared across the whole of each group, to measure the system's value over the current practice. | The holdout's churn rate is what would have happened without the program. Customers kept = (holdout churn rate − contacted churn rate) × customers contacted, over 90 days | Low today, because no holdout results exist yet. High once a full 90-day window of results is in, because random assignment rules out other explanations |
 | Customer Service Agent | Randomized A/B assignment. Routine contacts are randomly split between the agent and human staff | The human-handled group's resolution rate, handle time and cost per contact | Low today, because the agent is not deployed. High once a pilot runs, for the same reason |
 
 ### Investment Recommendation
@@ -302,3 +302,23 @@ For the CFO: each customer kept is worth $340 in lifetime value. 2,038 × $340 =
 |---|---|
 | Does redeeming an offer actually keep a customer? | For one quarter, randomly send each contacted customer either the offer or a contact with no offer, and compare how many stay after 90 days |
 | Does the agent routing a contact correctly lead to a more satisfied customer? | For 4 weeks, randomly give half of routine contacts a stricter rule for passing to staff, then compare audited correctness and satisfaction scores |
+
+## 4. Value Methodology Note
+
+### Value Methodology Note: Churn Prediction
+
+| Field | Value |
+|---|---|
+| 1. System name | Churn Prediction |
+| 2. Business objective | Reduce annual churn by contacting customers most likely to leave with retention offers. The CDO's target is 18% to 14% within a year. Section 3 shows it is not reachable; the realistic range is 17.1% to 17.9%. |
+| 3. Value dimension (efficiency / revenue / risk / experience) | Revenue: lifetime value kept |
+| 4. Primary metric | Incremental 90-day retention: 90-day retention of contacted customers minus that of the randomized no-offer holdout, per weekly cohort |
+| 5. Guardrail metrics (>=2) | (a) Loyalty-tier gap: the difference in the share of churners found between loyalty tiers must stay at or below 10 percentage points (the fairness SLO; a breach freezes deployments).<br>(b) Recall@10%, the share of churners the model places in its top 10%, must stay at or above 0.25 (the prediction-quality SLO). |
+| 6. Attribution method | Randomized holdout: 10% of each week's flagged customers get no offer. They are kept out of all retention contact for their full 90 days, even if flagged again (measures the retention program).<br>Second randomized comparison: customers are randomly assigned to a model arm or a rule arm (days since last purchase). Each arm contacts its own top 10%, and churn is compared across each whole arm, not only among contacted customers (measures the model against current practice). |
+| 7. Counterfactual | Without the system, the retention team ranks customers by days since last purchase and sends the top 10% each week the same generic 20% discount (the current offer).<br>On the model's own 3,000-customer test split (seed 42), that rule catches 30.0% of churners (198 of 660) against the model's 32.1% (212 of 660), with the same 300 contacts. The handout's rule, over 60 days, flags 19.6% of customers and catches 42.1% of churners, at twice the contact volume.<br>At NorthStar scale (378,000 annual leavers), the rule reaches 113,400 leavers and the model 121,414: about 8,000 more a year (7%).<br>This assumes the sample's 90-day catch rates hold for a full year across 2.1M customers. |
+| 8. Measurement window | Weekly cohorts, each read 90 days after it was scored, so the window matches field 9. Holdout customers get no retention contact for their full 90 days. No retention result is reported before day 90; the first read arrives 13 weeks after launch.<br>In between, click-through and offer redemption are reported weekly as early signals only, labeled provisional, and never converted to dollars. |
+| 9. Time to observe outcome | 90 days, the churn label's window |
+| 10. Confidence level (Low / Medium / High) | Low. No holdout results exist yet.<br>Program effect: High once the first 90-day cohorts are read.<br>Model versus rule: Low to Medium for longer, because the difference is small (about 2 points of churners caught) and needs several 90-day cycles of pooled cohorts. |
+| 11. Known confounders | Seasonal promotions and catalog changes, and external shocks such as a competitor's sale or a downturn. Randomization balances them across arms, but they can change the size of the effect, so results are reported by season and shock-period cohorts are flagged. |
+| 12. Financial conversion logic | Annual value = customers kept × $340 lifetime value − offer discount cost − churn system cost.<br>Customers kept = (holdout churn rate − contacted churn rate) × customers contacted, counting each customer once, at their first contact in the year (the single group of 210,000 in Section 3).<br>Offer discount cost = redeemed offers × 20% × average order value ($87 in store, $112 online).<br>Churn system cost = $130.69 a month computing plus about $2,406 a month churn review labor (weekly churn review $695.20, retrain and gate review $1,043.20, fairness review $348, holdout analysis $320; Section 2), over 12 months.<br>The model's own value over current practice = extra leavers reached (about 8,000 a year) × the measured win-back rate × $340. |
+| 13. Metric owner and review cadence | VP of Marketing (David Park) owns the metric and reviews each cohort weekly. The CDO (Maya Chen) and CFO (Robert Hess) review quarterly checkpoints. |
