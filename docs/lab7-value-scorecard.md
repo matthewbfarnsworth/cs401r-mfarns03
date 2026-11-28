@@ -322,3 +322,35 @@ For the CFO: each customer kept is worth $340 in lifetime value. 2,038 × $340 =
 | 11. Known confounders | Seasonal promotions and catalog changes, and external shocks such as a competitor's sale or a downturn. Randomization balances them across arms, but they can change the size of the effect, so results are reported by season and shock-period cohorts are flagged. |
 | 12. Financial conversion logic | Annual value = customers kept × $340 lifetime value − offer discount cost − churn system cost.<br>Customers kept = (holdout churn rate − contacted churn rate) × customers contacted, counting each customer once, at their first contact in the year (the single group of 210,000 in Section 3).<br>Offer discount cost = redeemed offers × 20% × average order value ($87 in store, $112 online).<br>Churn system cost = $130.69 a month computing plus about $2,406 a month churn review labor (weekly churn review $695.20, retrain and gate review $1,043.20, fairness review $348, holdout analysis $320; Section 2), over 12 months.<br>The model's own value over current practice = extra leavers reached (about 8,000 a year) × the measured win-back rate × $340. |
 | 13. Metric owner and review cadence | VP of Marketing (David Park) owns the metric and reviews each cohort weekly. The CDO (Maya Chen) and CFO (Robert Hess) review quarterly checkpoints. |
+
+## 5. Measurement Reflection
+
+### Weak assumption 1: Offer redemption rate -> Incremental 90-day retention
+
+Redemption is a choice, and may come from customers who would have stayed anyway (see the field study in Section 3). The claim to test: offered customers have higher 90-day retention than contacted customers with no offer.
+
+| Item | Design |
+|---|---|
+| Metric | 90-day retention |
+| Population | The week's top-10% contact list after removing the 10% holdout, randomly split into offer vs. contact without offer |
+| Duration | One weekly cohort, read 90 days after contact |
+| Success criterion | Offer group's 90-day churn is lower; 95% interval of the difference above zero |
+| Power | About 58% of contacted customers churn without an offer (121,414 / 210,000, Section 3), assuming their annual churn rate applies over the 90-day window. Detecting the published high-risk effect, 1.7% of leavers won back (57.8% vs 56.8% churn), at 80% power and 5% two-sided significance needs about 40,700 per arm. One week's list of 210,000 covers it |
+
+### Weak assumption 2: Recall@10% -> At-risk list size
+
+Recall@10% is measured only on the test split and list size only on live scoring; better ranking need not push more customers above 0.5.
+
+| Item | Design |
+|---|---|
+| Metric | At-risk list size and Recall@10%, on the same customers |
+| Population | Week's 2.1M scored customers, randomly halved: current model vs. prior approved registry version |
+| Duration | 12 weekly cohorts; Recall@10% read at day 90 |
+| Success criterion | Where one version's Recall@10% is higher (95% interval excluding zero), its list size is also higher |
+| Power | Detecting 0.32 vs 0.34 needs about 8,700 churners per arm. Assuming live 90-day churn is near the sample's 22%, that is about 39,500 customers per arm. Each half (1.05M) far exceeds it |
+
+### Least observed layer: User Experience
+
+For churn, campaign click-through and offer redemption are never joined to scored customers. For the customer service agent, CSAT and seven-day repeat contacts are not collected.
+
+To capture them, ingest campaign events from the marketing platform and redemptions from the loyalty platform. Then add a weekly Glue job that joins them to the scored list by customer and week, and log a post-contact CSAT survey and a seven-day repeat-contact flag by customer ID. This is about 2 weeks of engineering. The first 90-day reading arrives 90 days after data starts flowing.
